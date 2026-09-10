@@ -122,6 +122,7 @@ impl Fwdgt {
 ///
 /// No way out: the hardware cannot stop it, and neither the peripheral nor the
 /// period can be recovered.
+#[must_use = "the watchdog keeps running; without this value nothing can feed it"]
 pub struct FwdgtRunning {
     fwdgt: pac::Fwdgt,
 }

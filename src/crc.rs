@@ -50,6 +50,7 @@ pub enum ReverseOutput {
 /// Settings shared by every polynomial size.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[must_use]
 pub struct CrcConfig {
     reverse_input: ReverseInput,
     reverse_output: ReverseOutput,
@@ -78,12 +79,15 @@ impl Default for CrcConfig {
 fn configure(crc: &pac::Crc, ps: u8, poly: u32, config: CrcConfig) {
     let rev_o = matches!(config.reverse_output, ReverseOutput::Enabled);
     crc.ctl().modify(|_, w| {
+        // SAFETY: `ps` is one of the four `PS` codes, passed as a literal by
+        // the constructors.
         unsafe { w.ps().bits(ps) };
         w.rev_o()
             .bit(rev_o)
             .rev_i()
             .bits(config.reverse_input as u8)
     });
+    // SAFETY: every `u32` is a polynomial; narrower ones arrive zero-extended.
     crc.poly().write(|w| unsafe { w.bits(poly) });
 }
 
@@ -120,6 +124,8 @@ impl Crc<B32> {
     /// current result rather than replacing it.
     pub fn write_32bit(&mut self, data: u32) {
         let data_reg = self.crc.data().as_ptr();
+        // SAFETY: `data_reg` points at `DATA`, a live register aligned to four
+        // bytes, so a write of any width up to a word is valid.
         unsafe { data_reg.write_volatile(data) };
     }
     /// Reads the current accumulated CRC result.
@@ -148,7 +154,9 @@ impl Crc<B16> {
     /// Feeds one 16-bit word into the running CRC, combining it with the
     /// current result rather than replacing it.
     pub fn write_16bit(&mut self, data: u16) {
-        let data_reg = self.crc.data().as_ptr() as *mut u16;
+        let data_reg = self.crc.data().as_ptr().cast::<u16>();
+        // SAFETY: `data_reg` points at `DATA`, a live register aligned to four
+        // bytes, so a write of any width up to a word is valid.
         unsafe { data_reg.write_volatile(data) };
     }
     /// Reads the current accumulated CRC result.
@@ -177,7 +185,9 @@ impl Crc<B8> {
     /// Feeds one byte into the running CRC, combining it with the current
     /// result rather than replacing it.
     pub fn write_8bit(&mut self, data: u8) {
-        let data_reg = self.crc.data().as_ptr() as *mut u8;
+        let data_reg = self.crc.data().as_ptr().cast::<u8>();
+        // SAFETY: `data_reg` points at `DATA`, a live register aligned to four
+        // bytes, so a write of any width up to a word is valid.
         unsafe { data_reg.write_volatile(data) };
     }
     /// Reads the current accumulated CRC result.
@@ -207,7 +217,9 @@ impl Crc<B7> {
     /// with the current result rather than replacing it. The top bit is
     /// ignored by hardware.
     pub fn write_7bit(&mut self, data: u8) {
-        let data_reg = self.crc.data().as_ptr() as *mut u8;
+        let data_reg = self.crc.data().as_ptr().cast::<u8>();
+        // SAFETY: `data_reg` points at `DATA`, a live register aligned to four
+        // bytes, so a write of any width up to a word is valid.
         unsafe { data_reg.write_volatile(data) };
     }
     /// Reads the current accumulated CRC result, in the low 7 bits.

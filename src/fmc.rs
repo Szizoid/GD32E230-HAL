@@ -28,8 +28,8 @@ use crate::pac;
 const WS0_MAX_HCLK: u32 = 24_000_000;
 const WS1_MAX_HCLK: u32 = 48_000_000;
 const WS2_MAX_HCLK: u32 = 72_000_000;
-const UNLOCK_KEY1: u32 = 0x45670123;
-const UNLOCK_KEY2: u32 = 0xCDEF89AB;
+const UNLOCK_KEY1: u32 = 0x4567_0123;
+const UNLOCK_KEY2: u32 = 0xCDEF_89AB;
 
 const BASE: u32 = 0x0800_0000;
 const PAGE_SIZE: u32 = 0x400;
@@ -81,9 +81,10 @@ const fn user_bit(user: u8, bit: u8) -> bool {
 
 /// Returns `OB_USER` with one bit set to `on`, the rest untouched.
 const fn set_user_bit(user: u8, bit: u8, on: bool) -> u8 {
-    match on {
-        true => user | (1 << bit),
-        false => user & !(1 << bit),
+    if on {
+        user | (1 << bit)
+    } else {
+        user & !(1 << bit)
     }
 }
 
@@ -246,6 +247,7 @@ pub enum SramParity {
 /// block, change what you need, write it back.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[must_use]
 pub struct OptionBytes {
     protection: ProtectionLevel,
     user: u8,
@@ -360,44 +362,50 @@ impl OptionBytes {
     }
     /// Which free watchdog the part starts with.
     pub const fn get_free_watchdog(&self) -> FreeWatchdog {
-        match user_bit(self.user, BIT_NWDG_SW) {
-            true => FreeWatchdog::Software,
-            false => FreeWatchdog::Hardware,
+        if user_bit(self.user, BIT_NWDG_SW) {
+            FreeWatchdog::Software
+        } else {
+            FreeWatchdog::Hardware
         }
     }
     /// What entering deep-sleep does.
     pub const fn get_deep_sleep(&self) -> LowPowerEntry {
-        match user_bit(self.user, BIT_NRST_DPSLP) {
-            true => LowPowerEntry::Enter,
-            false => LowPowerEntry::Reset,
+        if user_bit(self.user, BIT_NRST_DPSLP) {
+            LowPowerEntry::Enter
+        } else {
+            LowPowerEntry::Reset
         }
     }
     /// What entering standby does.
     pub const fn get_standby(&self) -> LowPowerEntry {
-        match user_bit(self.user, BIT_NRST_STDBY) {
-            true => LowPowerEntry::Enter,
-            false => LowPowerEntry::Reset,
+        if user_bit(self.user, BIT_NRST_STDBY) {
+            LowPowerEntry::Enter
+        } else {
+            LowPowerEntry::Reset
         }
     }
     /// The level `BOOT1` is taken to have.
     pub const fn get_boot1(&self) -> Boot1 {
-        match user_bit(self.user, BIT_BOOT1_N) {
-            true => Boot1::Low,
-            false => Boot1::High,
+        if user_bit(self.user, BIT_BOOT1_N) {
+            Boot1::Low
+        } else {
+            Boot1::High
         }
     }
     /// Whether the VDDA monitor is on.
     pub const fn get_vdda_monitor(&self) -> VddaMonitor {
-        match user_bit(self.user, BIT_VDDA_VISOR) {
-            true => VddaMonitor::Enabled,
-            false => VddaMonitor::Disabled,
+        if user_bit(self.user, BIT_VDDA_VISOR) {
+            VddaMonitor::Enabled
+        } else {
+            VddaMonitor::Disabled
         }
     }
     /// Whether the SRAM parity check is on.
     pub const fn get_sram_parity(&self) -> SramParity {
-        match user_bit(self.user, BIT_SRAM_PARITY) {
-            true => SramParity::Disabled,
-            false => SramParity::Enabled,
+        if user_bit(self.user, BIT_SRAM_PARITY) {
+            SramParity::Disabled
+        } else {
+            SramParity::Enabled
         }
     }
     /// The two user data bytes.
@@ -416,7 +424,7 @@ pub struct UnlockedFmc<'a> {
     fmc: &'a mut Fmc,
 }
 
-impl<'a> UnlockedFmc<'a> {
+impl UnlockedFmc<'_> {
     fn lock(self) {
         self.fmc.fmc.ctl().modify(|_, w| w.lk().lock());
     }
@@ -425,6 +433,10 @@ impl<'a> UnlockedFmc<'a> {
     ///
     /// The whole page reads back as `0xFF`; nothing here checks what the page
     /// holds.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::WriteProtected`] if `page` is write-protected.
     pub fn erase_page(&mut self, page: Page) -> Result<(), Error> {
         self.fmc.fmc.ctl().modify(|_, w| w.per().page_erase());
         self.fmc.fmc.addr().write(|w| w.addr().bits(page as u32));
@@ -437,6 +449,10 @@ impl<'a> UnlockedFmc<'a> {
     ///
     /// That includes the code running the call, so this only makes sense from
     /// SRAM or from a debugger.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::WriteProtected`] if any page is write-protected.
     pub fn mass_erase(&mut self) -> Result<(), Error> {
         self.fmc.fmc.ctl().modify(|_, w| w.mer().mass_erase());
         self.fmc.fmc.ctl().modify(|_, w| w.start().start());
@@ -447,15 +463,20 @@ impl<'a> UnlockedFmc<'a> {
     /// Programs one 32-bit word, `index` counting words from the start of
     /// `page`, and blocks until it is done.
     ///
-    /// Programming only clears bits, so the word has to be erased first:
-    /// writing over anything but `0xFFFF_FFFF` returns [`Error::Program`].
+    /// Programming only clears bits, so the word has to be erased first.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::WriteProtected`] if `page` is write-protected, [`Error::Program`]
+    /// if the word holds anything but `0xFFFF_FFFF`.
     pub fn program(&mut self, page: Page, index: u8, word: u32) -> Result<(), Error> {
         self.fmc.fmc.ctl().modify(|_, w| w.pg().program());
         let addr = page as u32 + index as u32 * WORD_SIZE;
         // The write itself is the command: `PG` makes the FMC latch the address
         // and the data off the bus, so there is no `ADDR` and no `START` here.
-        // The address is in the flash and a multiple of four by construction —
-        // `Page` gives the base and 256 words is exactly what `u8` counts.
+        // SAFETY: the address is in the flash and a multiple of four by
+        // construction — `Page` gives the base and 256 words is exactly what `u8`
+        // counts.
         unsafe {
             core::ptr::write_volatile(addr as *mut u32, word);
         };
@@ -472,6 +493,11 @@ impl<'a> UnlockedFmc<'a> {
     ///
     /// Nothing here takes effect until the option bytes are loaded again, by
     /// [`Fmc::reload_option_bytes`] or by the next power-up.
+    ///
+    /// # Errors
+    ///
+    /// The first error the erase or the programming reports. The rest of the
+    /// call is skipped, leaving the block erased or partly programmed.
     pub fn write_option_bytes(&mut self, ob: &OptionBytes) -> Result<(), Error> {
         // `OBER` and `OBPG` answer to a second lock of their own.
         self.fmc.fmc.obkey().write(|w| w.obkey().bits(UNLOCK_KEY1));
@@ -512,8 +538,9 @@ impl<'a> UnlockedFmc<'a> {
         let mut result = Ok(());
         for (index, word) in words.iter().enumerate() {
             let addr = OB_BASE + index as u32 * WORD_SIZE;
-            // As in `program`, the write is the command. The address is a word
-            // of the option byte block, which the loop cannot leave.
+            // As in `program`, the write is the command.
+            // SAFETY: the address is a word of the option byte block, which the
+            // loop cannot leave.
             unsafe { core::ptr::write_volatile(addr as *mut u32, *word) };
             result = self.fmc.wait_busy();
             if result.is_err() {

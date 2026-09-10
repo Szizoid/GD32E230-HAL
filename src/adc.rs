@@ -19,7 +19,7 @@ use crate::gpio::{Analog, Pin};
 use crate::pac;
 use crate::rcu::{Clocks, Enable, Rcu, Reset};
 
-const VREFINT_CAL_ADDR: *const u16 = 0x1FFFF7C0 as *const u16;
+const VREFINT_CAL_ADDR: *const u16 = 0x1FFF_F7C0 as *const u16;
 /// Erased-flash value: the factory VREFINT calibration is missing on this part.
 const VREFINT_CAL_BLANK: u16 = 0xFFFF;
 /// Typical VREFINT (datasheet 4.13): ~1.2 V. Used only when the factory
@@ -35,7 +35,7 @@ const AVG_SLOPE_X10: i32 = 43;
 const TEMP_CHANNEL: u8 = 16;
 const VREF_CHANNEL: u8 = 17;
 
-/// Cycles of CK_ADC to wait between ADCON and calibration (manual, 11.4.1).
+/// Cycles of `CK_ADC` to wait between ADCON and calibration (manual, 11.4.1).
 const CALIBRATION_DELAY_CYCLES: u32 = 14;
 /// Minimum sampling time for the temperature sensor: 17.1 us (manual, 10.4.11).
 const TEMP_MIN_SAMPTIME_US_X10: u64 = 171;
@@ -116,6 +116,8 @@ impl Adc {
 
     fn set_channel(&mut self, channel: u8) {
         self.adc.rsq0().modify(|_, w| w.rl().bits(0b0));
+        // SAFETY: `channel` is an input number — 0–9 from a `Channel` impl, or
+        // `TEMP_CHANNEL`/`VREF_CHANNEL` — each one the field can select.
         self.adc
             .rsq2()
             .modify(|_, w| unsafe { w.rsq0().bits(channel) });
@@ -242,6 +244,8 @@ impl Adc {
     /// If that calibration is blank (`0xFFFF`, seen on some parts), falls back to
     /// the typical VREFINT of ~1.2 V: less accurate, but not wildly wrong.
     pub fn read_vref(&mut self) -> i32 {
+        // SAFETY: `VREFINT_CAL_ADDR` is an aligned half-word of system memory,
+        // always readable and never written.
         let vrefint_cal = unsafe { core::ptr::read_volatile(VREFINT_CAL_ADDR) };
         let raw = self.with_internal(|s| {
             s.set_internal_channel(VREF_CHANNEL);

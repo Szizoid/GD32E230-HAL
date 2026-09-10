@@ -396,14 +396,16 @@ impl<const P: char, const N: u8> Pin<P, N, Debugger> {
 const fn reg(port: Port) -> &'static pac::gpioa::RegisterBlock {
     let ptr = match port {
         Port::A => pac::Gpioa::ptr(),
-        Port::B => pac::Gpiob::ptr() as *const _,
+        Port::B => pac::Gpiob::ptr().cast(),
         // Ports C and F have no LOCK, and the PAC gives port F no AFSEL0/1
         // either, though the silicon does — reaching them through this block is
         // what makes `PF0`/`PF1`/`PF6`/`PF7` usable as alternate functions.
         #[cfg(pads_ge_48)]
-        Port::C => pac::Gpioc::ptr() as *const _,
-        Port::F => pac::Gpiof::ptr() as *const _,
+        Port::C => pac::Gpioc::ptr().cast(),
+        Port::F => pac::Gpiof::ptr().cast(),
     };
+    // SAFETY: every port block lives at a fixed address for the whole program
+    // and shares port A's layout; the registers C and F lack are never reached.
     unsafe { &*ptr }
 }
 
@@ -421,19 +423,23 @@ fn read_octl(port: Port, number: u8) -> bool {
 
 #[inline]
 fn set_bop(port: Port, number: u8) {
+    // SAFETY: `number` is below 16, so the one bit set names a pin.
     reg(port).bop().write(|w| unsafe { w.bits(1 << number) });
 }
 
 #[inline]
 fn set_bc(port: Port, number: u8) {
+    // SAFETY: `number` is below 16, so the one bit set names a pin.
     reg(port).bc().write(|w| unsafe { w.bits(1 << number) });
 }
 
 #[inline]
 fn set_tg(port: Port, number: u8) {
+    // SAFETY: `number` is below 16, so the one bit set names a pin.
     reg(port).tg().write(|w| unsafe { w.bits(1 << number) });
 }
 
+#[allow(clippy::unused_self)]
 impl<const P: char, const N: u8, MODE> Pin<P, N, MODE> {
     fn reg(&self) -> &'static pac::gpioa::RegisterBlock {
         reg(Port::from_char(P))
@@ -465,6 +471,7 @@ impl<const P: char, const N: u8, MODE> Pin<P, N, MODE> {
 impl<const P: char, const N: u8, MODE> Pin<P, N, MODE> {
     fn set_mode(&mut self, mode: Ctl) {
         let offset = N * 2;
+        // SAFETY: only this pin's two bits change, to a `Ctl` code.
         self.reg().ctl().modify(|r, w| unsafe {
             w.bits((r.bits() & !(0b11 << offset)) | ((mode as u32) << offset))
         });
@@ -473,10 +480,13 @@ impl<const P: char, const N: u8, MODE> Pin<P, N, MODE> {
         let is_afsel0 = N < 8;
         let offset = (N % 8) * 4;
         if is_afsel0 {
+            // SAFETY: only this pin's four bits change; `af` passed a `ValidAf`
+            // bound, so it is an AF number of the pin map.
             self.reg().afsel0().modify(|r, w| unsafe {
                 w.bits((r.bits() & !(0b1111 << offset)) | (af << offset))
             });
         } else {
+            // SAFETY: as in the branch above.
             self.reg().afsel1().modify(|r, w| unsafe {
                 w.bits((r.bits() & !(0b1111 << offset)) | (af << offset))
             });
@@ -484,18 +494,21 @@ impl<const P: char, const N: u8, MODE> Pin<P, N, MODE> {
     }
     fn set_pud(&mut self, bits: u32) {
         let offset = N * 2;
+        // SAFETY: only this pin's two bits change, to a `Pull` code.
         self.reg()
             .pud()
             .modify(|r, w| unsafe { w.bits((r.bits() & !(0b11 << offset)) | (bits << offset)) });
     }
     fn set_ospd(&mut self, bits: u32) {
         let offset = N * 2;
+        // SAFETY: only this pin's two bits change, to a `Speed` code.
         self.reg()
             .ospd()
             .modify(|r, w| unsafe { w.bits((r.bits() & !(0b11 << offset)) | (bits << offset)) });
     }
     fn set_omode(&mut self, omode: Omode) {
         let offset = N;
+        // SAFETY: only this pin's bit changes, to an `Omode` code.
         self.reg().omode().modify(|r, w| unsafe {
             w.bits((r.bits() & !(0b1 << offset)) | ((omode as u32) << offset))
         });

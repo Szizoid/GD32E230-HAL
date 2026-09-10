@@ -33,6 +33,11 @@ use crate::time::{Bps, Hertz};
 const DATA_7BIT_MASK: u8 = 0x7F;
 /// 9 data bits: the full 9-bit word in `WL=1, PCEN=0` mode.
 const DATA_9BIT_MASK: u32 = 0x1FF;
+/// Largest `USARTDIV` that fits `BAUD` at ×16 oversampling.
+const USARTDIV_MAX_X16: u32 = 0xFFFF;
+/// Largest `USARTDIV` that fits `BAUD` at ×8: the integer part, `usartdiv / 8`,
+/// has 12 bits.
+const USARTDIV_MAX_X8: u32 = 0x7FFF;
 
 /// Marks a pin usable as `TX` for `USART`, in the right alternate function.
 pub trait TxPin<USART> {}
@@ -166,6 +171,7 @@ pub enum FrameFormat {
 /// usual "115200 8N1".
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[must_use]
 pub struct UsartConfig {
     baud: Bps,
     oversampling: Oversampling,
@@ -206,6 +212,7 @@ impl Default for UsartConfig {
 /// to choose.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[must_use]
 pub struct UsartConfig9 {
     baud: Bps,
     oversampling: Oversampling,
@@ -238,12 +245,23 @@ where
     USARTX: Deref<Target = pac::usart0::RegisterBlock> + Enable + Reset + BusClocks,
 {
     let clocks = rcu.clocks();
-    USARTX::enable(rcu);
-    USARTX::reset(rcu);
     let pclk = USARTX::clock(&clocks).to_Hz();
     let baud = baud.to_raw();
+    assert!(baud != 0, "USART baud rate must not be zero");
     // round(pclk / baud) in integers: adding half the divisor before truncating rounds.
     let usartdiv = (pclk + baud / 2) / baud;
+    let usartdiv_max = match oversampling {
+        Oversampling::X16 => USARTDIV_MAX_X16,
+        Oversampling::X8 => USARTDIV_MAX_X8,
+    };
+    assert!(
+        usartdiv <= usartdiv_max,
+        "USART baud rate too low for this clock"
+    );
+
+    USARTX::enable(rcu);
+    USARTX::reset(rcu);
+    // SAFETY: asserted above to fit `BAUD`.
     usart.baud().write(|w| unsafe {
         match oversampling {
             Oversampling::X16 => w.bits(usartdiv),
@@ -351,7 +369,7 @@ pub enum Event {
     /// A framing, noise or overrun error.
     ///
     /// Reaches the NVIC **only while receiving through DMA**: in hardware the
-    /// enable is ANDed with the DMA request line, so without it the interrupt
+    /// enable is `ANDed` with the DMA request line, so without it the interrupt
     /// never fires. Cleared by [`take_error`](Usart::take_error), which a
     /// handler must call — nothing else drains these flags on the DMA path.
     Error,
@@ -519,6 +537,7 @@ where
     /// [`flush`](Usart::flush).
     pub fn write_byte(&mut self, byte: u8) {
         while !self.tbe() {}
+        // SAFETY: a byte always fits `TDATA`.
         self.usart.tdata().write(|w| unsafe { w.bits(byte as u32) });
     }
     /// Sends every byte of `buf`, blocking until the last one is handed over.
@@ -532,8 +551,10 @@ where
     }
     /// Receives one byte, blocking until one arrives.
     ///
-    /// A line error consumes the offending frame and is reported instead of the
-    /// data, so a damaged byte is never mistaken for a good one.
+    /// # Errors
+    ///
+    /// The line error flagged on the frame, which is consumed and reported
+    /// instead of the data, so a damaged byte is never mistaken for a good one.
     pub fn read_byte(&mut self) -> Result<u8, Error> {
         while !self.rbne() {}
         if let Some(e) = self.take_error() {
@@ -547,8 +568,12 @@ where
     /// Blocks until at least one byte arrives, then takes whatever else is
     /// waiting and returns — it does *not* wait for `buf` to fill, which would
     /// deadlock against a peer waiting for its answer. Returns `0` only for an
-    /// empty `buf`. A line error ends the call at once, losing the bytes copied
-    /// before it: the count is not reported alongside an error.
+    /// empty `buf`.
+    ///
+    /// # Errors
+    ///
+    /// A line error ends the call at once, losing the bytes copied before it:
+    /// the count is not reported alongside an error.
     pub fn read_bytes(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
         if buf.is_empty() {
             return Ok(0);
@@ -573,6 +598,11 @@ where
     ///
     /// The pins must already be in this USART's alternate function;
     /// [`release`](Usart::release) hands them back.
+    ///
+    /// # Panics
+    ///
+    /// If the baud rate is zero, or too low to reach from the USART's clock.
+    /// Checked before the peripheral is touched.
     pub fn new(rcu: &mut Rcu, usart: USARTX, tx_pin: TX, rx_pin: RX, config: UsartConfig) -> Self {
         configure(rcu, &usart, config.baud, config.oversampling);
 
@@ -603,6 +633,7 @@ where
     /// Bits above the ninth are discarded.
     pub fn write_word(&mut self, word: u16) {
         while !self.tbe() {}
+        // SAFETY: masked to the nine bits `TDATA` holds.
         self.usart
             .tdata()
             .write(|w| unsafe { w.bits(word as u32 & DATA_9BIT_MASK) });
@@ -617,6 +648,10 @@ where
         }
     }
     /// Receives one 9-bit word, blocking until one arrives.
+    ///
+    /// # Errors
+    ///
+    /// As for [`read_byte`](Usart::read_byte).
     pub fn read_word(&mut self) -> Result<u16, Error> {
         while !self.rbne() {}
         if let Some(e) = self.take_error() {
@@ -629,6 +664,10 @@ where
     ///
     /// Same blocking rule as [`read_bytes`](Usart::read_bytes): waits for the
     /// first word, then takes only what is already waiting.
+    ///
+    /// # Errors
+    ///
+    /// As for [`read_bytes`](Usart::read_bytes).
     pub fn read_words(&mut self, buf: &mut [u16]) -> Result<usize, Error> {
         if buf.is_empty() {
             return Ok(0);
@@ -653,6 +692,10 @@ where
     ///
     /// All nine bits carry data, so there is no frame format to choose and the
     /// peripheral moves `u16` rather than `u8`.
+    ///
+    /// # Panics
+    ///
+    /// As for [`new`](Usart::new).
     pub fn new_word(
         rcu: &mut Rcu,
         usart: USARTX,
@@ -712,11 +755,12 @@ where
     USARTX: Deref<Target = pac::usart0::RegisterBlock>,
 {
     fn write(&mut self, byte: u8) -> nb::Result<(), Self::Error> {
-        if !self.tbe() {
-            Err(nb::Error::WouldBlock)
-        } else {
+        if self.tbe() {
+            // SAFETY: a byte always fits `TDATA`.
             self.usart.tdata().write(|w| unsafe { w.bits(byte as u32) });
             Ok(())
+        } else {
+            Err(nb::Error::WouldBlock)
         }
     }
     fn flush(&mut self) -> nb::Result<(), Self::Error> {

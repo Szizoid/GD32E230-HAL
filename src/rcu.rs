@@ -222,6 +222,7 @@ impl Clocks {
 /// whether it was named or not.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[must_use]
 pub struct ClockConfig {
     hclk: AhbPsc,
     pclk1: ApbPsc,
@@ -294,6 +295,7 @@ impl UnfrozenRcu {
     ///
     /// Flash wait states are raised from the new `hclk` *before* the system clock
     /// switches over, so the flash is never read faster than it can respond.
+    #[allow(clippy::too_many_lines)]
     pub fn freeze(self, fmc: &mut Fmc, config: ClockConfig) -> Rcu {
         let sysclk = match config.sysclk {
             SysClk::Irc8m => IRC8M,

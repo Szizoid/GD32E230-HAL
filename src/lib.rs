@@ -1,4 +1,4 @@
-//! Hardware abstraction layer for the GD32E23x series (Cortex-M23), built on top
+//! Hardware abstraction layer for the `GD32E23x` series (Cortex-M23), built on top
 //! of the [`gd32e2`](https://crates.io/crates/gd32e2) peripheral access crate.
 //! Only the GD32E230 is implemented so far; the crate is named for the family it
 //! is meant to grow into.
@@ -35,11 +35,19 @@
 //! ```
 
 #![no_std]
+// --- Warnings ---
 #![warn(missing_docs)]
-// #![warn(clippy::pedantic)]
-// #![warn(clippy::cargo)]
-// #![warn(clippy::undocumented_unsafe_blocks)]
-// #![warn(clippy::missing_docs_in_private_items)]
+// --- Cargo warnings ---
+#![warn(clippy::cargo)]
+#![allow(clippy::multiple_crate_versions)]
+// --- Pedantic warnings ---
+#![warn(clippy::pedantic)]
+#![allow(clippy::struct_field_names)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_lossless)]
+#![allow(clippy::must_use_candidate)]
+// --- Unsafe warnings ---
+#![warn(clippy::undocumented_unsafe_blocks)]
 
 // Both halves of the choice are checked in build.rs, which counts the enabled
 // features and knows their names. This guards the source against being compiled

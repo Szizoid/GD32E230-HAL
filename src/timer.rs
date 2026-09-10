@@ -161,6 +161,7 @@ pub trait Instance: Enable + Reset {
     /// The HAL's typestate rests on one handle meaning one configuration in
     /// flight. Keeping two handles from contradicting each other is on the
     /// caller — disjoint registers, or no reconfiguration through both.
+    #[must_use]
     unsafe fn steal(&self) -> Self;
 }
 
@@ -182,10 +183,10 @@ macro_rules! timer_instance {
                 }
                 // The `CAR` writer is unsafe on TIMER2 only (unconstrained field
                 // in the SVD), safe on the other six; one macro body serves all.
-                // Every `u16` is a legal reload value in counting mode.
                 #[allow(unused_unsafe)]
                 #[inline]
                 fn set_car(&mut self, car: u16) {
+                    // SAFETY: every `u16` is a legal reload value in counting mode.
                     self.car().write(|w| unsafe { w.car().bits(car) });
                 }
                 #[inline]
@@ -226,7 +227,9 @@ macro_rules! timer_instance {
                 fn clear_upif(&mut self) {
                     self.intf().modify(|_, w| w.upif().clear());
                 }
-                unsafe fn steal(&self) -> Self{
+                unsafe fn steal(&self) -> Self {
+                    // SAFETY: forwarded — this method's caller takes on the PAC's
+                    // contract along with its own.
                     unsafe { Self::steal() }
                 }
             }
@@ -501,8 +504,9 @@ impl<TIMERX: Instance> Pwm<TIMERX> {
     {
         self.timer.apply_pwm_mode();
         PwmChannel {
-            // Each channel reaches its own compare register and its own bits of
-            // the shared ones — the obligation `steal` places on the caller.
+            // SAFETY: each channel reaches its own compare register and its own
+            // bits of the shared ones — the obligation `steal` places on the
+            // caller.
             timer: unsafe { self.timer.steal() },
             pin,
         }
@@ -621,8 +625,9 @@ impl<TIMERX: Instance> Capture<TIMERX> {
         self.timer.apply_capture_mode();
         self.timer.select_edge(edge);
         CaptureChannel {
-            // Each channel reaches its own capture register and its own bits of
-            // the shared ones — the obligation `steal` places on the caller.
+            // SAFETY: each channel reaches its own capture register and its own
+            // bits of the shared ones — the obligation `steal` places on the
+            // caller.
             timer: unsafe { self.timer.steal() },
             pin,
             clk: self.clk,
@@ -801,6 +806,7 @@ macro_rules! pwm {
             }
             #[allow(unused_unsafe)]
             fn set_chxcv(&mut self, cv: u16) {
+                // SAFETY: every `u16` is a legal compare value.
                 self.[<ch $Ch cv>]().write(|w| unsafe { w.[<ch $Ch val>]().bits(cv) });
             }
         })+)+ }
@@ -1074,12 +1080,11 @@ impl<TIMERX: CaptureOps<C>, PIN: ChannelPin<TIMERX, C>, const C: u8>
         // Hardware only raises these flags; left standing, `CHxIF` would report
         // the same edge for ever.
         self.timer.clear_chxif();
-        match lost {
-            true => {
-                self.timer.clear_chxof();
-                Err(nb::Error::Other(Error::Overcapture))
-            }
-            false => Ok(cv),
+        if lost {
+            self.timer.clear_chxof();
+            Err(nb::Error::Other(Error::Overcapture))
+        } else {
+            Ok(cv)
         }
     }
 

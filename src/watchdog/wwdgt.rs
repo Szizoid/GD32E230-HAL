@@ -83,6 +83,7 @@ impl Wwdgt {
 ///
 /// No way out: `WDGTEN` ignores a written zero and only a hardware reset clears
 /// it, so neither the peripheral nor the period comes back.
+#[must_use = "the watchdog keeps running; without this value nothing can feed it"]
 pub struct WwdgtRunning {
     wwdgt: pac::Wwdgt,
     cnt: u8,

@@ -84,6 +84,7 @@ pub enum BitOrder {
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[must_use]
 pub struct SpiConfig {
     psc: SpiPsc,
     mode: Mode,
@@ -260,6 +261,7 @@ impl Instance for pac::Spi0 {
                 .bit(config.mode.polarity == Polarity::IdleHigh)
                 .ckph()
                 .bit(config.mode.phase == Phase::CaptureOnSecondTransition);
+            // SAFETY: `SpiPsc` discriminants are the eight `PSC` codes.
             unsafe { w.psc().bits(config.psc as u8) }
         });
     }
@@ -273,6 +275,7 @@ impl Instance for pac::Spi0 {
     }
     #[inline]
     fn write_data(&mut self, word: u16) {
+        // SAFETY: `DATA` takes any 16-bit word.
         self.data().write(|w| unsafe { w.data().bits(word) });
     }
     #[inline]
@@ -334,6 +337,7 @@ impl Instance for pac::Spi1 {
     fn apply_config(&mut self, config: SpiConfig, wide: bool) {
         self.ctl1().modify(|_, w| {
             let w = w.byten().bit(!wide);
+            // SAFETY: both constants are `DZ` codes, for 8 and 16 bits.
             unsafe { w.dz().bits(if wide { DZ_16BIT } else { DZ_8BIT }) }
         });
         self.ctl0().modify(|_, w| {
@@ -352,6 +356,7 @@ impl Instance for pac::Spi1 {
                 .bit(config.mode.polarity == Polarity::IdleHigh)
                 .ckph()
                 .bit(config.mode.phase == Phase::CaptureOnSecondTransition);
+            // SAFETY: `SpiPsc` discriminants are the eight `PSC` codes.
             unsafe { w.psc().bits(config.psc as u8) }
         });
     }
@@ -365,6 +370,7 @@ impl Instance for pac::Spi1 {
     }
     #[inline]
     fn write_data(&mut self, word: u16) {
+        // SAFETY: `DATA` takes any 16-bit word.
         self.data().write(|w| unsafe { w.data().bits(word) });
     }
     #[inline]
@@ -605,6 +611,11 @@ where
     ///
     /// Blocks until the exchange has completed, so nothing is left pending on the
     /// bus when it returns.
+    ///
+    /// # Errors
+    ///
+    /// The error [`take_error`](Spi::take_error) finds once the exchange is
+    /// over; the received byte is then discarded.
     pub fn transfer_byte(&mut self, byte: u8) -> Result<u8, Error> {
         while !self.write_ready() {}
         self.write_byte(byte);
@@ -618,6 +629,11 @@ where
 
     /// Exchanges two buffers: byte `i` of `write` goes out and what comes back
     /// lands at byte `i` of `read`.
+    ///
+    /// # Errors
+    ///
+    /// The first failed exchange, as in [`transfer_byte`](Spi::transfer_byte);
+    /// the bytes after it are neither sent nor received.
     ///
     /// # Panics
     ///
@@ -634,6 +650,11 @@ where
         Ok(())
     }
     /// Exchanges `words` against itself: each byte is replaced by what came back.
+    ///
+    /// # Errors
+    ///
+    /// The first failed exchange, as in [`transfer_byte`](Spi::transfer_byte);
+    /// the bytes after it are neither sent nor received.
     pub fn transfer_bytes_in_place(&mut self, words: &mut [u8]) -> Result<(), Error> {
         for word in words {
             *word = self.transfer_byte(*word)?;
@@ -667,6 +688,11 @@ where
     ///
     /// Blocks until the exchange has completed, so nothing is left pending on the
     /// bus when it returns.
+    ///
+    /// # Errors
+    ///
+    /// The error [`take_error`](Spi::take_error) finds once the exchange is
+    /// over; the received word is then discarded.
     pub fn transfer_word(&mut self, word: u16) -> Result<u16, Error> {
         while !self.write_ready() {}
         self.write_word(word);
@@ -680,6 +706,11 @@ where
 
     /// Exchanges two buffers: word `i` of `write` goes out and what comes back
     /// lands at word `i` of `read`.
+    ///
+    /// # Errors
+    ///
+    /// The first failed exchange, as in [`transfer_word`](Spi::transfer_word);
+    /// the words after it are neither sent nor received.
     ///
     /// # Panics
     ///
@@ -696,6 +727,11 @@ where
         Ok(())
     }
     /// Exchanges `words` against itself: each word is replaced by what came back.
+    ///
+    /// # Errors
+    ///
+    /// The first failed exchange, as in [`transfer_word`](Spi::transfer_word);
+    /// the words after it are neither sent nor received.
     pub fn transfer_words_in_place(&mut self, words: &mut [u16]) -> Result<(), Error> {
         for word in words {
             *word = self.transfer_word(*word)?;

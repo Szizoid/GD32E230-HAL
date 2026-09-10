@@ -20,29 +20,42 @@ impl Syscfg {
     /// If `line` is above 15 — the lines above that have no source to select.
     pub(crate) fn set_extiss(&mut self, line: u8, code: u8) {
         match line {
-            l @ 0..=3 => self.syscfg.extiss0().modify(|_, w| match l {
-                0 => unsafe { w.exti0_ss().bits(code) },
-                1 => unsafe { w.exti1_ss().bits(code) },
-                2 => unsafe { w.exti2_ss().bits(code) },
-                _ => unsafe { w.exti3_ss().bits(code) },
+            // SAFETY: `code` is an `ExtiPin::SS_CODE`, one of the port codes this
+            // field takes.
+            l @ 0..=3 => self.syscfg.extiss0().modify(|_, w| unsafe {
+                match l {
+                    0 => w.exti0_ss().bits(code),
+                    1 => w.exti1_ss().bits(code),
+                    2 => w.exti2_ss().bits(code),
+                    _ => w.exti3_ss().bits(code),
+                }
             }),
-            l @ 4..=7 => self.syscfg.extiss1().modify(|_, w| match l {
-                4 => unsafe { w.exti4_ss().bits(code) },
-                5 => unsafe { w.exti5_ss().bits(code) },
-                6 => unsafe { w.exti6_ss().bits(code) },
-                _ => unsafe { w.exti7_ss().bits(code) },
+            // SAFETY: as above.
+            l @ 4..=7 => self.syscfg.extiss1().modify(|_, w| unsafe {
+                match l {
+                    4 => w.exti4_ss().bits(code),
+                    5 => w.exti5_ss().bits(code),
+                    6 => w.exti6_ss().bits(code),
+                    _ => w.exti7_ss().bits(code),
+                }
             }),
-            l @ 8..=11 => self.syscfg.extiss2().modify(|_, w| match l {
-                8 => unsafe { w.exti8_ss().bits(code) },
-                9 => unsafe { w.exti9_ss().bits(code) },
-                10 => unsafe { w.exti10_ss().bits(code) },
-                _ => unsafe { w.exti11_ss().bits(code) },
+            // SAFETY: as above.
+            l @ 8..=11 => self.syscfg.extiss2().modify(|_, w| unsafe {
+                match l {
+                    8 => w.exti8_ss().bits(code),
+                    9 => w.exti9_ss().bits(code),
+                    10 => w.exti10_ss().bits(code),
+                    _ => w.exti11_ss().bits(code),
+                }
             }),
-            l @ 12..=15 => self.syscfg.extiss3().modify(|_, w| match l {
-                12 => unsafe { w.exti12_ss().bits(code) },
-                13 => unsafe { w.exti13_ss().bits(code) },
-                14 => unsafe { w.exti14_ss().bits(code) },
-                _ => unsafe { w.exti15_ss().bits(code) },
+            // SAFETY: as above.
+            l @ 12..=15 => self.syscfg.extiss3().modify(|_, w| unsafe {
+                match l {
+                    12 => w.exti12_ss().bits(code),
+                    13 => w.exti13_ss().bits(code),
+                    14 => w.exti14_ss().bits(code),
+                    _ => w.exti15_ss().bits(code),
+                }
             }),
             _ => unreachable!(),
         }

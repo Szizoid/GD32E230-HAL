@@ -56,7 +56,10 @@ pub struct Channel<const N: u8> {
 }
 
 impl<const N: u8> Channel<N> {
+    #[allow(clippy::unused_self)]
     fn reg(&self) -> &pac::dma::RegisterBlock {
+        // SAFETY: the block lives at a fixed address for the whole program; a
+        // channel touches its own registers and its own bits of the shared ones.
         unsafe { &*pac::Dma::ptr() }
     }
 }
@@ -121,11 +124,14 @@ macro_rules! channels {
                 /// Points the channel at the peripheral data register.
                 #[inline]
                 fn set_paddr(&mut self, addr: u32) {
+                    // SAFETY: `addr` comes from `DmaPeriph::addr`, a data register.
                     self.reg().[<ch $N paddr>]().write(|w| unsafe { w.bits(addr) });
                 }
                 /// Points the channel at the memory buffer.
                 #[inline]
                 fn set_maddr(&mut self, addr: u32) {
+                    // SAFETY: `addr` comes from a `'static` buffer of the
+                    // transfer's word type.
                     self.reg().[<ch $N maddr>]().write(|w| unsafe { w.bits(addr) });
                 }
                 /// Sets how many transfers the channel performs.
@@ -230,12 +236,18 @@ macro_rules! dma_map {
             impl<$($gen),*> DmaPeriph<$N> for $Ty {
                 type Word = $W;
                 fn addr(&self) -> u32 {
+                    // SAFETY: the block lives at a fixed address for the whole
+                    // program, and only the register's address is taken.
                     unsafe { (*<$Periph>::ptr()).$reg().as_ptr() as u32 }
                 }
                 fn enable_dma(&mut self) {
+                    // SAFETY: `self` owns the peripheral, and `&mut self` rules
+                    // out another access to it.
                     unsafe { (*<$Periph>::ptr()).$ctl().modify(|_, w| w.$den().set_bit()) };
                 }
                 fn disable_dma(&mut self) {
+                    // SAFETY: `self` owns the peripheral, and `&mut self` rules
+                    // out another access to it.
                     unsafe { (*<$Periph>::ptr()).$ctl().modify(|_, w| w.$den().clear_bit()) };
                 }
             }
@@ -332,6 +344,7 @@ where
 // The bounds sit on the declaration only because `Drop` demands it: a `Drop` impl
 // may not require more than the type it drops.
 #[allow(private_bounds)]
+#[must_use = "dropping a `Transfer` stops it at once; `wait` lets it finish"]
 pub struct Transfer<const N: u8, P, BUF>
 where
     Channel<N>: ChannelOps,
@@ -359,16 +372,16 @@ where
         self.periph.disable_dma();
         self.channel.set_enabled(false);
         self.channel.clear_flags();
-        // The parts are read out rather than moved out, because a type with a
-        // `Drop` impl cannot be taken apart. `ManuallyDrop` is what makes the
-        // duplicated ownership sound: the originals are never dropped, never
-        // used again, and go out of scope with this expression.
         let transfer = ManuallyDrop::new(self);
+        // SAFETY: the parts are read out rather than moved out, because a type
+        // with a `Drop` impl cannot be taken apart. `ManuallyDrop` is what makes
+        // the duplicated ownership sound: the originals are never dropped, never
+        // used again, and go out of scope with this expression.
         unsafe {
             (
-                ptr::read(&transfer.channel),
-                ptr::read(&transfer.periph),
-                ptr::read(&transfer.buf),
+                ptr::read(&raw const transfer.channel),
+                ptr::read(&raw const transfer.periph),
+                ptr::read(&raw const transfer.buf),
             )
         }
     }

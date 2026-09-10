@@ -150,7 +150,10 @@ pub struct ExtiLine<const N: u8, SRC> {
 }
 
 impl<const N: u8, SRC> ExtiLine<N, SRC> {
+    #[allow(clippy::unused_self)]
     fn reg(&self) -> &pac::exti::RegisterBlock {
+        // SAFETY: the block lives at a fixed address for the whole program, and
+        // a line touches only its own bit of it.
         unsafe { &*pac::Exti::ptr() }
     }
 }
@@ -196,21 +199,25 @@ where
         }
     }
     fn set_rten(&mut self, on: bool) {
+        // SAFETY: only this line's bit changes; the rest is written back as read.
         self.reg()
             .rten()
             .modify(|r, w| unsafe { w.bits(Self::with_bit(r.bits(), on)) });
     }
     fn set_ften(&mut self, on: bool) {
+        // SAFETY: only this line's bit changes; the rest is written back as read.
         self.reg()
             .ften()
             .modify(|r, w| unsafe { w.bits(Self::with_bit(r.bits(), on)) });
     }
     fn set_inten(&mut self, on: bool) {
+        // SAFETY: only this line's bit changes; the rest is written back as read.
         self.reg()
             .inten()
             .modify(|r, w| unsafe { w.bits(Self::with_bit(r.bits(), on)) });
     }
     fn set_even(&mut self, on: bool) {
+        // SAFETY: only this line's bit changes; the rest is written back as read.
         self.reg()
             .even()
             .modify(|r, w| unsafe { w.bits(Self::with_bit(r.bits(), on)) });
@@ -286,6 +293,7 @@ where
     /// Read-modify-write on a register shared by every line: when lines are
     /// configured from different contexts, put the call in a critical section.
     pub fn pend(&mut self) {
+        // SAFETY: only this line's bit is set; the rest is written back as read.
         self.reg()
             .swiev()
             .modify(|r, w| unsafe { w.bits(Self::with_bit(r.bits(), true)) });
@@ -305,6 +313,7 @@ where
     /// The request is a level, so a handler that returns without this is
     /// entered again at once.
     pub fn clear_interrupt(&mut self) {
+        // SAFETY: `PD` clears on one and ignores zero, so only this line clears.
         self.reg().pd().write(|w| unsafe { w.bits(Self::MASK) });
     }
 }

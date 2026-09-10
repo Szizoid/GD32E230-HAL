@@ -144,6 +144,7 @@ pub enum Polarity {
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[must_use]
 pub struct CmpConfig {
     speed: Speed,
     hysteresis: Hysteresis,
@@ -227,6 +228,8 @@ impl<POS: NonInvertingInput, INV: InvertingInput> Cmp<POS, INV> {
             let w = w.cmposel().bits(config.output_sel as u8);
             let w = w.cmpm().bits(config.speed as u8);
             let w = w.cmppl().bit(config.polarity == Polarity::Inverted);
+            // SAFETY: `MSEL` comes from an `InvertingInput` impl, each one a
+            // code of this field.
             let w = unsafe { w.cmpmsel().bits(INV::MSEL) };
             w.cmpsw().bit(POS::SW)
         });

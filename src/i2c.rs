@@ -129,6 +129,9 @@ fn apply_config<I2C: Instance>(i2c: &I2C, mode: I2cMode, pclk1: Hertz) {
     let risetime = |t_rise_ns: u32| (pclk1_mhz * t_rise_ns / 1_000 + 1) as u8;
 
     i2c.ctl0().modify(|_, w| w.i2cen().disabled());
+    // SAFETY: `pclk1` in whole megahertz, which the clock tree keeps within the
+    // field; a value below the mode's minimum is rejected by the asserts that
+    // follow, before `I2CEN` goes back up.
     i2c.ctl1()
         .modify(|_, w| unsafe { w.i2cclk().bits(pclk1_mhz as u8) });
 
@@ -283,9 +286,9 @@ pub enum Error {
     NoAcknowledge(NoAcknowledgeSource),
     /// The received PEC does not match the one computed locally (`PECERR`).
     Pec,
-    /// An SMBus transaction exceeded its timeout (`SMBTO`).
+    /// An `SMBus` transaction exceeded its timeout (`SMBTO`).
     SmbusTimeout,
-    /// An SMBus device pulled the alert line (`SMBALT`).
+    /// An `SMBus` device pulled the alert line (`SMBALT`).
     SmbusAlert,
 }
 
@@ -560,9 +563,14 @@ where
     ///
     /// `address` is the plain 7-bit value from the datasheet; the direction bit
     /// is appended here. Blocks until the last byte is out and acknowledged, so
-    /// the bus is idle on return. An unanswered address is
-    /// [`Error::NoAcknowledge`] with [`NoAcknowledgeSource::Address`], which is
-    /// how a bus scan finds devices.
+    /// the bus is idle on return.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NoAcknowledge`] if nothing answers the address — with
+    /// [`NoAcknowledgeSource::Address`], which is how a bus scan finds devices —
+    /// or the device refuses a byte; [`Error::Bus`] or
+    /// [`Error::ArbitrationLoss`] on a bus fault.
     ///
     /// # Panics
     ///
@@ -610,6 +618,10 @@ where
     ///
     /// An empty `bytes` is a no-op: a zero-byte transfer has no acknowledge to
     /// end on.
+    ///
+    /// # Errors
+    ///
+    /// As for [`write`](Self::write); only the address can go unanswered.
     ///
     /// # Panics
     ///
@@ -729,6 +741,10 @@ where
     ///
     /// An empty `read` degenerates to [`write`](Self::write), an empty `write`
     /// to [`read`](Self::read).
+    ///
+    /// # Errors
+    ///
+    /// As for [`write`](Self::write), from either phase.
     ///
     /// # Panics
     ///
@@ -894,6 +910,7 @@ enum WriteState {
 /// [`on_interrupt`](Self::on_interrupt); the transfer is over once
 /// [`is_done`](Self::is_done) says so, and [`release`](Self::release) takes it
 /// apart.
+#[must_use = "dropping the transfer aborts it"]
 pub struct WriteTransfer<I2CX, SDA, SCL>
 where
     I2CX: Instance,
@@ -964,6 +981,7 @@ where
     ///
     /// `None` means the transfer was taken apart while still running, in which
     /// case the bus is released with a STOP first.
+    #[allow(clippy::type_complexity)]
     pub fn release(
         self,
     ) -> (
@@ -972,15 +990,14 @@ where
         Option<Result<(), Error>>,
     ) {
         let mut this = ManuallyDrop::new(self);
-        let outcome = match this.state {
-            WriteState::Done(result) => Some(result),
-            _ => {
-                this.abort();
-                None
-            }
+        let outcome = if let WriteState::Done(result) = this.state {
+            Some(result)
+        } else {
+            this.abort();
+            None
         };
-        // Safe: `this` is never dropped, so the fields are read exactly once.
-        let i2c = unsafe { ptr::read(&this.i2c) };
+        // SAFETY: `this` is never dropped, so the field is read exactly once.
+        let i2c = unsafe { ptr::read(&raw const this.i2c) };
         (i2c, this.buf, outcome)
     }
     /// Stops every interrupt and records the outcome. The bus is released by
@@ -1037,6 +1054,7 @@ enum ReadState {
 /// [`on_interrupt`](Self::on_interrupt); the transfer is over once
 /// [`is_done`](Self::is_done) says so, and [`release`](Self::release) takes it
 /// apart.
+#[must_use = "dropping the transfer aborts it"]
 pub struct ReadTransfer<I2CX, SDA, SCL>
 where
     I2CX: Instance,
@@ -1145,6 +1163,7 @@ where
     ///
     /// `None` means the transfer was taken apart while still running, in which
     /// case the bus is released with a STOP first.
+    #[allow(clippy::type_complexity)]
     pub fn release(
         self,
     ) -> (
@@ -1153,16 +1172,19 @@ where
         Option<Result<(), Error>>,
     ) {
         let mut this = ManuallyDrop::new(self);
-        let outcome = match this.state {
-            ReadState::Done(result) => Some(result),
-            _ => {
-                this.abort();
-                None
-            }
+        let outcome = if let ReadState::Done(result) = this.state {
+            Some(result)
+        } else {
+            this.abort();
+            None
         };
-        // Safe: `this` is never dropped, so the fields are read exactly once.
-        let i2c = unsafe { ptr::read(&this.i2c) };
-        let buf = unsafe { ptr::read(&this.buf) };
+        // SAFETY: `this` is never dropped, so the fields are read exactly once.
+        let (i2c, buf) = unsafe {
+            (
+                ptr::read(&raw const this.i2c),
+                ptr::read(&raw const this.buf),
+            )
+        };
         (i2c, buf, outcome)
     }
     /// Stops every interrupt, restores `POAP` and records the outcome. The bus
