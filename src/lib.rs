@@ -36,6 +36,10 @@
 
 #![no_std]
 #![warn(missing_docs)]
+// #![warn(clippy::pedantic)]
+// #![warn(clippy::cargo)]
+// #![warn(clippy::undocumented_unsafe_blocks)]
+// #![warn(clippy::missing_docs_in_private_items)]
 
 // Both halves of the choice are checked in build.rs, which counts the enabled
 // features and knows their names. This guards the source against being compiled

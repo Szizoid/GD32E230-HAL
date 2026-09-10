@@ -77,6 +77,8 @@ if let Ok(byte) = usart0.read_byte() {
 
 ```shell
 cargo lib             # the library only, an alias for build --features gd32e230c8xx
+cargo libclippy       # clippy over the library, with the same feature
+cargo pubdry          # publish --dry-run with the same feature
 cargo be usart-echo   # check that one example builds, no probe needed
 cargo bre usart-echo  # the same in release
 cargo examples        # every example in release, skipping the ones for another part
@@ -191,6 +193,8 @@ if let Ok(byte) = usart0.read_byte() {
 
 ```shell
 cargo lib             # только библиотека, алиас для build --features gd32e230c8xx
+cargo libclippy       # clippy по библиотеке, с той же фичей
+cargo pubdry          # publish --dry-run с той же фичей
 cargo be usart-echo   # проверить сборку одного примера, зонд не нужен
 cargo bre usart-echo  # то же в release
 cargo examples        # все примеры в release, кроме примеров под другой партномер
