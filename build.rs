@@ -10,8 +10,8 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-/// Every part of the series: feature name, flash code, pad set, flash and SRAM in
-/// KiB.
+/// Every part of the series: feature name, flash code, pad set, timer count, flash
+/// and SRAM in KiB.
 ///
 /// The flash code also gives the SRAM size (4 -> 4K, 6 -> 6K, 8 -> 8K), but both
 /// are spelled out rather than derived — a future part that breaks the pattern
