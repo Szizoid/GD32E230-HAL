@@ -73,6 +73,8 @@ fn main() -> ! {
             .replace(Some((spi, [0; LENGTH], 0, MESSAGE, 0)))
     });
 
+    // SAFETY: the critical sections here use PRIMASK, not NVIC masks, so
+    // unmasking breaks none of them.
     unsafe {
         NVIC::unmask(pac::Interrupt::SPI0);
     };

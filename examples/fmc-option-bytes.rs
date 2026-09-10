@@ -12,8 +12,8 @@
 //! the test again, give `TARGET` another value and reflash.
 //!
 //! `option_error` is the check that matters at the end: it says the loaded
-//! bytes matched their complements, which is what tells us the complements this
-//! HAL writes are the ones the silicon expects.
+//! bytes matched their complements, which confirms the complements written are
+//! the ones the silicon expects.
 //!
 //! Covers: `read_option_bytes`, `write_option_bytes`, `reload_option_bytes`.
 

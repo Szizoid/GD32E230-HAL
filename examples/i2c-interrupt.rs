@@ -62,6 +62,8 @@ fn main() -> ! {
     let bus = I2c::new(&mut rcu, dp.i2c0, sda, scl, I2cMode::standard(50.kHz()));
 
     // Both vectors: `on_interrupt` reads the flags itself, so either may wake it.
+    // SAFETY: the critical sections here use PRIMASK, not NVIC masks, so
+    // unmasking breaks none of them.
     unsafe {
         NVIC::unmask(pac::Interrupt::I2C0_EV);
         NVIC::unmask(pac::Interrupt::I2C0_ER);

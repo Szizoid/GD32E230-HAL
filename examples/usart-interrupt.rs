@@ -32,9 +32,9 @@ type Uart = Usart<pac::Usart0, Pin<'A', 9, Alternate<1>>, Pin<'A', 10, Alternate
 
 type Shared = (
     Uart,
-    [u8; BUF_LENGH], // READ
+    [u8; BUF_LENGTH], // READ
     usize,
-    [u8; BUF_LENGH], // WRITE
+    [u8; BUF_LENGTH], // WRITE
     usize,
 );
 
@@ -42,8 +42,8 @@ static SHARED: Mutex<RefCell<Option<Shared>>> = Mutex::new(RefCell::new(None));
 
 const MESSAGE: &[u8] = b"Some test message, made long enough that a slow baud rate stretches the \
       whole round trip out over several seconds instead of finishing at once.";
-const BUF_LENGH: usize = MESSAGE.len();
-const WRITE_BUF: &[u8; BUF_LENGH] = MESSAGE.first_chunk().unwrap();
+const BUF_LENGTH: usize = MESSAGE.len();
+const WRITE_BUF: &[u8; BUF_LENGTH] = MESSAGE.first_chunk().unwrap();
 
 #[entry]
 fn main() -> ! {
@@ -70,16 +70,18 @@ fn main() -> ! {
     critical_section::with(|cs| {
         SHARED
             .borrow(cs)
-            .replace(Some((usart, [0; BUF_LENGH], 0, *WRITE_BUF, 0)))
+            .replace(Some((usart, [0; BUF_LENGTH], 0, *WRITE_BUF, 0)))
     });
 
+    // SAFETY: the critical sections here use PRIMASK, not NVIC masks, so
+    // unmasking breaks none of them.
     unsafe {
         NVIC::unmask(pac::Interrupt::USART0);
     };
 
     defmt::info!(
         "USART0 armed, echoing {} bytes over the PA9-PA10 loopback",
-        BUF_LENGH
+        BUF_LENGTH
     );
 
     loop {
@@ -94,10 +96,10 @@ fn USART0() {
         let (usart, read_buf, to_read, write_buf, to_write) = shared.as_mut().unwrap();
         if usart.is_listening(Event::Rbne) && Usart::read_ready(usart) {
             if let Ok(byte) = usart.read_byte() {
-                if *to_read < BUF_LENGH {
+                if *to_read < BUF_LENGTH {
                     read_buf[*to_read] = byte;
                     *to_read += 1;
-                    if *to_read == BUF_LENGH {
+                    if *to_read == BUF_LENGTH {
                         if read_buf == write_buf {
                             defmt::info!("echo ok");
                         } else {
@@ -108,7 +110,7 @@ fn USART0() {
             }
         }
         if usart.is_listening(Event::Tbe) && Usart::write_ready(usart) {
-            if *to_write < BUF_LENGH {
+            if *to_write < BUF_LENGTH {
                 usart.write_byte(write_buf[*to_write]);
                 *to_write += 1;
             } else {

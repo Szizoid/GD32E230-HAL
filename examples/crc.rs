@@ -33,7 +33,7 @@ fn main() -> ! {
     let config = CrcConfig::new(ReverseInput::Disabled, ReverseOutput::Disabled);
     let mut crc = Crc::new_8bit(&mut rcu, dp.crc, 0x07, config);
 
-    // new_8bit doesn't touch IDATA/RST, so start from a known seed explicitly.
+    // Construction does not seed the result, so start from a known one.
     crc.reset_with(0);
     for &byte in CHECK_INPUT {
         crc.write_8bit(byte);

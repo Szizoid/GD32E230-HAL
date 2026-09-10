@@ -120,6 +120,8 @@ fn main() -> ! {
             .replace(Some((capture, sense, 0, None, None)));
     });
 
+    // SAFETY: the critical sections here use PRIMASK, not NVIC masks, so
+    // unmasking breaks none of them.
     unsafe { NVIC::unmask(pac::Interrupt::TIMER14) };
 
     source.set_low();

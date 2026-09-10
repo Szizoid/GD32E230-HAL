@@ -11,14 +11,13 @@
 //! 500 distinct phases before repeating, and a batch of 500 visits each one
 //! once. The mean is then the duty exactly, not approximately. A round ratio
 //! like 200 ms over 500 us instead locks onto a single phase and reports a
-//! constant 0 or 4095 forever, which is what this example did first.
+//! constant 0 or 4095 forever.
 //!
 //! `main` ramps the duty in a plain blocking loop — no interrupt needed there,
 //! it is the thing actively changing. `TIMER5`'s update interrupt fires on a
 //! fixed period and does nothing but trigger a conversion (`Adc::start`); the
 //! ADC's own `Eoc` interrupt fires once that conversion is ready, accumulates
-//! it (`Adc::result`) and reports every full batch. Two independent sources,
-//! chained through the ADC hardware rather than through each other.
+//! it (`Adc::result`) and reports every full batch.
 //!
 //! Covers: `Adc::start`/`result`/`listen`, `CountDownTimer::listen` driving
 //! another peripheral's work instead of the caller's own.
@@ -95,6 +94,8 @@ fn main() -> ! {
             .replace(Some((adc, trigger, adc_pin, 0, 0)));
     });
 
+    // SAFETY: the critical sections here use PRIMASK, not NVIC masks, so
+    // unmasking breaks none of them.
     unsafe {
         NVIC::unmask(pac::Interrupt::TIMER5);
         NVIC::unmask(pac::Interrupt::ADC_CMP);

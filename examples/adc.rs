@@ -2,11 +2,11 @@
 //!
 //! Needs no external wiring to be useful — `read_vref` and `read_temperature`
 //! read on-chip sources. The external read is on PA0; leave it floating or tie
-//! it to a known voltage. Results go over USART0 (PA9/PA10) at 115200 8N1.
+//! it to a known voltage. Results go over RTT.
 //!
-//! `adc_sel` must be set, or `CK_ADC` stays at zero and `constrain` would divide
-//! by it. Covers: `AdcExt::constrain`, `read`, `read_vref`, `read_temperature`,
-//! `SampTime`, and `into_analog` / the `Channel` bound.
+//! `adc_sel` must be set, or `constrain` panics. Covers: `AdcExt::constrain`,
+//! `read`, `read_vref`, `read_temperature`, `SampTime`, and `into_analog` / the
+//! `Channel` bound.
 
 #![no_std]
 #![no_main]

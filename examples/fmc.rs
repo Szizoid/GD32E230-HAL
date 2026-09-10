@@ -38,8 +38,8 @@ const ERASED: u32 = 0xFFFF_FFFF;
 /// Reads one word of `PAGE`, `index` counting words from its start.
 fn read_word(index: u8) -> u32 {
     let addr = PAGE as u32 + index as u32 * 4;
-    // The flash is mapped for reading like any other memory, and the address is
-    // in it by construction.
+    // SAFETY: the flash is mapped for reading like any other memory, and the
+    // address lies in it by construction.
     unsafe { core::ptr::read_volatile(addr as *const u32) }
 }
 

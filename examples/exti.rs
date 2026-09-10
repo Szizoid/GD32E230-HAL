@@ -54,6 +54,8 @@ fn main() -> ! {
     line.edge(EdgeTrigger::Rising);
     line.listen();
     critical_section::with(|cs| LINE.borrow(cs).replace(Some(line)));
+    // SAFETY: the critical sections here use PRIMASK, not NVIC masks, so
+    // unmasking breaks none of them.
     unsafe { NVIC::unmask(pac::Interrupt::EXTI0_1) };
 
     // Rising only: two toggles per round, one edge each way, one interrupt.

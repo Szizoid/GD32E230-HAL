@@ -45,8 +45,8 @@ static ENDS: AtomicU32 = AtomicU32::new(0);
 /// unmasking with it still set would re-enter the handler at once.
 fn rearm() {
     NVIC::unpend(pac::Interrupt::FMC);
-    // Safe: the handler touches ENDS and the NVIC only, never a register that
-    // `main` is using.
+    // SAFETY: the critical sections here use PRIMASK, not NVIC masks, so
+    // unmasking breaks none of them.
     unsafe { NVIC::unmask(pac::Interrupt::FMC) };
 }
 

@@ -2,10 +2,8 @@
 //!
 //! Each round opens with a few idle seconds — the window for reattaching the
 //! probe, since the board reboots itself here — and then branches on what caused
-//! the last reset, so a single binary shows two different failures in turn:
-//!
-//! Both rounds start the same way, feeding correctly a few times, and differ
-//! only in which bound they then break:
+//! the last reset, so a single binary shows two different failures in turn. Both
+//! rounds feed correctly a few times, then break one bound each:
 //!
 //! - **first round**, no watchdog reset yet: feeds far too early. That is the
 //!   bound a plain watchdog does not have, and it resets the board just as a
@@ -83,8 +81,8 @@ fn main() -> ! {
 
         defmt::info!("no more feeding — expect the early wakeup, then a reset");
         critical_section::with(|cs| WATCHDOG.borrow(cs).replace(Some(wwdgt)));
-        // SAFETY: the handler reaches the watchdog through WATCHDOG, which is
-        // filled in above, so the line cannot fire on an empty cell.
+        // SAFETY: the critical sections here use PRIMASK, not NVIC masks, so
+        // unmasking breaks none of them.
         unsafe { NVIC::unmask(interrupt::WWDGT) };
         loop {
             cortex_m::asm::wfi();
@@ -124,8 +122,8 @@ fn WWDGT() {
         let wwdgt = watchdog.as_mut().unwrap();
         if wwdgt.is_pending() {
             wwdgt.clear_interrupt();
-            // Not fed on purpose: clearing the flag only stops the handler from
-            // re-entering, and the reset still lands one tick from here.
+            // Not fed on purpose. The flag rises again while the counter sits
+            // at 0x40, so the handler re-enters until the reset one tick later.
             defmt::info!("one tick left — the reset lands next");
         }
     })

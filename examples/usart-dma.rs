@@ -1,7 +1,10 @@
 //! Sends a fixed message over USART0 without the core touching a single byte.
 //!
 //! Same wiring as `usart-echo`: PA9/PA10 at 115200 8N1. Channel 1 is the one the
-//! hardware ties to USART0_TX, so any other channel would fail to compile.
+//! hardware ties to USART0_TX.
+//!
+//! Covers: `DmaExt::split`, `Channel::write_to`, `Transfer::remaining` and
+//! `wait`.
 
 #![no_std]
 #![no_main]
@@ -28,8 +31,6 @@ fn main() -> ! {
     let config = ClockConfig::default().sysclk(SysClk::Pll(PllFreq::Mhz48));
     let mut rcu = dp.rcu.constrain().freeze(&mut fmc, config);
     let parts = dp.gpioa.split(&mut rcu);
-    let mut pa6 = parts.pa6.into_output();
-    pa6.set_high();
 
     let tx_pin = parts.pa9.into_alternate::<1>();
     let rx_pin = parts.pa10.into_alternate::<1>();

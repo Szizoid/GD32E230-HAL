@@ -49,8 +49,8 @@ fn main() -> ! {
         SHARED.borrow(cs).replace(Some((timer, led)));
     });
 
-    // Safe: the handler only ever reaches SHARED, and only through the same
-    // mutex `main` just released — no register of TIMER5 is touched here.
+    // SAFETY: the critical sections here use PRIMASK, not NVIC masks, so
+    // unmasking breaks none of them.
     unsafe { NVIC::unmask(pac::Interrupt::TIMER5) };
 
     defmt::info!("TIMER5 armed, PA1 toggles once a second from the handler");

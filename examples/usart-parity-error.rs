@@ -90,6 +90,8 @@ fn main() -> ! {
             .frame_format(FrameFormat::O8),
     );
 
+    // SAFETY: the critical sections here use PRIMASK, not NVIC masks, so
+    // unmasking breaks none of them.
     unsafe {
         NVIC::unmask(pac::Interrupt::USART1);
     };
