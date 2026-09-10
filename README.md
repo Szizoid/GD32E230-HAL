@@ -79,6 +79,7 @@ if let Ok(byte) = usart0.read_byte() {
 cargo lib             # the library only, an alias for build --features gd32e230c8xx
 cargo be usart-echo   # check that one example builds, no probe needed
 cargo bre usart-echo  # the same in release
+cargo examples        # every example in release, skipping the ones for another part
 cargo re usart-echo   # build + flash over SWD, stays attached afterwards
 ```
 
@@ -192,6 +193,7 @@ if let Ok(byte) = usart0.read_byte() {
 cargo lib             # только библиотека, алиас для build --features gd32e230c8xx
 cargo be usart-echo   # проверить сборку одного примера, зонд не нужен
 cargo bre usart-echo  # то же в release
+cargo examples        # все примеры в release, кроме примеров под другой партномер
 cargo re usart-echo   # сборка + прошивка по SWD, дальше остаётся подключённым
 ```
 
