@@ -1,4 +1,13 @@
 //! Hardware CRC calculation unit.
+//!
+//! ```ignore
+//! let mut crc = Crc::new_32bit(&mut rcu, dp.crc, 0x04C1_1DB7, CrcConfig::default());
+//! crc.reset_with(0xFFFF_FFFF);
+//! for &word in data {
+//!     crc.write_32bit(word);
+//! }
+//! let result = crc.read_32bit();
+//! ```
 
 use core::marker::PhantomData;
 
@@ -88,6 +97,9 @@ fn new_seed(crc: &pac::Crc, idata: u32) {
 ///
 /// `PS` ([`B32`]/[`B16`]/[`B8`]/[`B7`]) fixes the polynomial width for the
 /// lifetime of the value, selected by which constructor built it.
+///
+/// Construction does not seed the result: call
+/// [`reset_with`](Crc::<B32>::reset_with) before the first write.
 pub struct Crc<PS> {
     crc: pac::Crc,
     _poly_size: PhantomData<PS>,
@@ -211,11 +223,13 @@ impl Crc<B7> {
 }
 
 impl<PS> Crc<PS> {
-    /// Reads the current accumulated CRC result.
+    /// Reads the whole `DATA` register, not cut down to the polynomial width.
     pub fn read(&self) -> u32 {
         self.crc.data().read().data().bits()
     }
 
+    /// Returns the peripheral.
+    ///
     /// The clock is left enabled — a later `new_*bit()` re-enables it anyway.
     pub fn release(self) -> pac::Crc {
         self.crc

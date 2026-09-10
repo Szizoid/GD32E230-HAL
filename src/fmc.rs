@@ -2,8 +2,8 @@
 //!
 //! The wait states are not set from here: they have to be raised before the
 //! system clock speeds up, so
-//! [`UnfrozenRcu::freeze`](crate::rcu::UnfrozenRcu::freeze) borrows this type and
-//! writes them itself.
+//! [`UnfrozenRcu::freeze`](crate::rcu::UnfrozenRcu::freeze) borrows this type
+//! and writes them itself.
 //!
 //! Erasing and programming need `CTL` unlocked, which happens for the body of
 //! [`Fmc::with_unlocked`] and no longer. The option bytes are covered too, as a
@@ -92,9 +92,8 @@ macro_rules! pages {
         paste::paste! {
             /// An erasable 1 KB page of the main flash.
             ///
-            /// The discriminant is the address the page starts at, so it goes
-            /// into `ADDR` as it is. How many pages exist follows the flash of
-            /// the part being built for: 16, 32 or 64.
+            /// How many pages exist follows the flash of the part being built
+            /// for: 16, 32 or 64.
             #[allow(missing_docs)]
             #[derive(Clone, Copy, PartialEq, Eq)]
             #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -130,7 +129,7 @@ pages!(
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Event {
-    /// An erase or a program operation finished (`ENDF`).
+    /// An erase or a program operation finished (`ENDIE`).
     End,
     /// An operation failed (`ERRIE`); which way is [`Fmc::take_error`].
     Error,
@@ -164,10 +163,6 @@ pub enum ProtectionLevel {
 
 impl ProtectionLevel {
     /// The `OB_SPC` code standing for this level.
-    ///
-    /// A separate type rather than a discriminant of this one: the same level is
-    /// spelled one way in `OB_SPC` and another in the `PLEVEL` field this enum is
-    /// also read from.
     const fn spc(self) -> Spc {
         match self {
             ProtectionLevel::None => Spc::None,
@@ -177,8 +172,7 @@ impl ProtectionLevel {
     }
 }
 
-/// The `OB_SPC` byte itself (user manual, Table 2-3), the discriminant being the
-/// code that goes into the option byte.
+/// The `OB_SPC` byte itself (user manual, Table 2-3).
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[repr(u8)]
@@ -200,7 +194,7 @@ pub enum FreeWatchdog {
     /// the first instruction on.
     Hardware,
     /// Started by software, which is what
-    /// [`Fwdgt::start`](crate::watchdog::FwdgtRunning) expects.
+    /// [`Fwdgt::start`](crate::watchdog::Fwdgt::start) expects.
     Software,
 }
 
@@ -244,9 +238,8 @@ pub enum SramParity {
     Enabled,
 }
 
-/// The option byte block as a whole, read with
-/// [`Fmc::read_option_bytes`] and written back with
-/// [`UnlockedFmc::write_option_bytes`].
+/// The option byte block as a whole, read with [`Fmc::read_option_bytes`] and
+/// written back with [`UnlockedFmc::write_option_bytes`].
 ///
 /// Writing goes through the whole block because erasing does: option bytes lose
 /// every byte at once, so a single field cannot be changed on its own. Read the
@@ -430,9 +423,8 @@ impl<'a> UnlockedFmc<'a> {
 
     /// Erases one page, blocking until it is done.
     ///
-    /// The whole page reads back as `0xFF`, so a page holding code or data still
-    /// in use has to be picked by the caller, not by us — nothing here checks
-    /// what is in it.
+    /// The whole page reads back as `0xFF`; nothing here checks what the page
+    /// holds.
     pub fn erase_page(&mut self, page: Page) -> Result<(), Error> {
         self.fmc.fmc.ctl().modify(|_, w| w.per().page_erase());
         self.fmc.fmc.addr().write(|w| w.addr().bits(page as u32));
@@ -455,8 +447,8 @@ impl<'a> UnlockedFmc<'a> {
     /// Programs one 32-bit word, `index` counting words from the start of
     /// `page`, and blocks until it is done.
     ///
-    /// Programming only clears bits, so the word has to be erased first: writing
-    /// over anything but `0xFFFF_FFFF` returns [`Error::Program`].
+    /// Programming only clears bits, so the word has to be erased first:
+    /// writing over anything but `0xFFFF_FFFF` returns [`Error::Program`].
     pub fn program(&mut self, page: Page, index: u8, word: u32) -> Result<(), Error> {
         self.fmc.fmc.ctl().modify(|_, w| w.pg().program());
         let addr = page as u32 + index as u32 * WORD_SIZE;
@@ -535,9 +527,13 @@ impl<'a> UnlockedFmc<'a> {
     /// Raises an interrupt on `event`, which still has to be unmasked in the
     /// NVIC.
     ///
-    /// `ENDIE` and `ERRIE` sit in `CTL`, which the lock covers whole, so this
-    /// can only be done from inside [`Fmc::with_unlocked`]. The interrupt itself
-    /// outlives the call: locking `CTL` again leaves both bits standing.
+    /// The interrupt outlives [`Fmc::with_unlocked`]: locking `CTL` again leaves
+    /// it enabled.
+    ///
+    /// `ENDF` is a level, and it rises while a blocking operation still holds
+    /// the controller, so a handler has nothing to clear it with: mask the line
+    /// in the NVIC inside the handler, then unpend and unmask it once the call
+    /// has returned.
     pub fn listen(&mut self, event: Event) {
         self.fmc.fmc.ctl().modify(|_, w| match event {
             Event::End => w.endie().enabled(),
@@ -612,8 +608,8 @@ impl Fmc {
 
     /// Whether the option bytes protect `page` from being erased or programmed.
     ///
-    /// This is what stands behind [`Error::WriteProtected`]. Protection comes in
-    /// groups of four pages, so neighbours share the answer.
+    /// This is what stands behind [`Error::WriteProtected`]. Protection comes
+    /// in groups of four pages, so neighbours share the answer.
     pub fn is_protected(&self, page: Page) -> bool {
         wp_protected(self.fmc.wp().read().bits(), page)
     }
@@ -633,8 +629,8 @@ impl Fmc {
     pub fn option_error(&self) -> bool {
         self.fmc.obstat().read().oberr().is_error()
     }
-    /// The user option byte, raw: this HAL does not write the option bytes, so
-    /// its bits are left to the caller to read against the manual.
+    /// The user option byte, raw;
+    /// [`read_option_bytes`](Self::read_option_bytes) decodes it.
     pub fn user_option(&self) -> u8 {
         self.fmc.obstat().read().ob_user().bits()
     }
@@ -666,8 +662,6 @@ impl Fmc {
     /// returns.
     ///
     /// This is how a written block takes effect without cycling the power.
-    /// `OBRLD` is the one bit of `CTL` the lock leaves writable, so no
-    /// unlocking is needed.
     pub fn reload_option_bytes(&mut self) -> ! {
         self.fmc.ctl().modify(|_, w| w.obrld().set_bit());
         loop {
@@ -688,9 +682,6 @@ impl Fmc {
     }
 
     /// Returns the error the last operation ended with, clearing its flag.
-    ///
-    /// `ENDF` is left alone: it marks success and never stands together with an
-    /// error.
     pub fn take_error(&mut self) -> Option<Error> {
         let stat = self.fmc.stat().read();
         if stat.wperr().is_error() {
@@ -708,9 +699,6 @@ impl Fmc {
     }
 
     /// Whether `event` currently raises an interrupt.
-    ///
-    /// Reading `CTL` is not covered by the lock, so a handler can ask without
-    /// unlocking anything.
     pub fn is_listening(&self, event: Event) -> bool {
         let ctl = self.fmc.ctl().read();
         match event {
@@ -733,7 +721,7 @@ impl Fmc {
     }
 }
 
-/// Entry point on the raw peripheral, mirroring [`GpioExt`](crate::gpio::GpioExt).
+/// Entry point on the raw peripheral.
 pub trait FmcExt {
     /// Takes the peripheral.
     ///

@@ -1,17 +1,11 @@
 //! Typed units for frequencies and durations, aliased from `fugit`.
 //!
-//! The units themselves come from [`fugit`], which keeps rates and durations
-//! apart as distinct kinds and converts between scales at compile time. This
-//! module names its `u32` instances, so signatures stay short and the dependency
-//! is pinned in one place; `u64` is not aliased, the core being 32-bit.
-//!
-//! The scale lives in the type and costs nothing at runtime, so a value crosses
-//! between units by conversion rather than by arithmetic on a bare number.
+//! This module names the `u32` instances of [`fugit`]; `u64` is not aliased.
 //!
 //! The generic [`Duration`] and [`Rate`] are re-exported for signatures that
 //! stay open to any scale, as are the suffix traits: [`ExtU32`] for durations
-//! and [`RateExtU32`] for frequencies, joined by our own [`BpsExtU32`] for bit
-//! rates, which `fugit` has no suffix for. The whole crate is re-exported too, so
+//! and [`RateExtU32`] for frequencies, joined by [`BpsExtU32`] for bit rates,
+//! which `fugit` has no suffix for. The whole crate is re-exported too, so
 //! `Instant`, the tick-based `TimerDuration` and the `u64` widths are reachable
 //! without adding a matching dependency downstream.
 //!
@@ -54,7 +48,7 @@ pub type MinutesDuration = fugit::MinutesDurationU32;
 /// Duration in hours.
 pub type HoursDuration = fugit::HoursDurationU32;
 
-/// Suffix for bit rates, `fugit` having none: `115_200.bps()`.
+/// Suffix for bit rates: `115_200.bps()`.
 pub trait BpsExtU32 {
     /// Reads the number as symbols per second.
     fn bps(self) -> Bps;

@@ -1,8 +1,7 @@
 //! One import for the traits whose methods this HAL is used through.
 //!
-//! Traits are re-exported anonymously (`as _`), so the methods arrive without the
-//! names and nothing can collide with the user's own items. Types are not
-//! re-exported — import those from their own modules.
+//! Traits are re-exported anonymously (`as _`): their methods arrive, their names
+//! do not. Types are not re-exported — import those from their own modules.
 //!
 //! ```ignore
 //! use gd32e2_hal::prelude::*;          // everything

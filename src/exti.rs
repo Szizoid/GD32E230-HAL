@@ -4,13 +4,9 @@
 //! The detector is asynchronous, so it works with the system clock stopped,
 //! which is what makes EXTI the way out of deep sleep and standby.
 //!
-//! [`ExtiExt::split`] hands out one token per line, and only the lines that
-//! exist — the reserved numbers have no field to name. Lines 0 to 15 arrive
+//! [`ExtiExt::split`] hands out one token per line. Lines 0 to 15 arrive
 //! without a source and reach the rest of their API by being given a pin, which
 //! they then own; the internal lines have their source wired in silicon.
-//!
-//! One line serves every port: `PA0`, `PB0` and `PF0` all feed line 0, and the
-//! single token is what keeps two of them from claiming it.
 //!
 //! The pin lines share three vectors — `EXTI0_1`, `EXTI2_3`, `EXTI4_15` — so a
 //! handler serves several lines and has to ask which of them is pending. The
@@ -21,6 +17,15 @@
 //! The two outputs are not symmetric in what they leave behind: only the
 //! interrupt path latches `PD`, so a line used for events alone has no flag to
 //! clear after `WFE`.
+//!
+//! ```ignore
+//! let mut syscfg = dp.syscfg.constrain(&mut rcu);
+//! let pa0 = dp.gpioa.split(&mut rcu).pa0.into_input();
+//! let mut line = dp.exti.split().line0.source(&mut syscfg, pa0);
+//! line.edge(EdgeTrigger::Rising);
+//! line.listen();
+//! unsafe { NVIC::unmask(pac::Interrupt::EXTI0_1) };
+//! ```
 
 use crate::gpio::Pin;
 use crate::pac;
@@ -34,10 +39,6 @@ pub struct InternalSrc;
 
 /// Marks a line whose source is settled, which is what the rest of the line's
 /// API hangs off.
-///
-/// Implemented for [`InternalSrc`] and for every pin, but never for
-/// [`PinSrc`]: a line that has not been given a port would otherwise listen to
-/// whatever `EXTISS` happens to hold, which after reset is port A.
 pub trait ExtiConfigured {}
 
 impl ExtiConfigured for InternalSrc {}
@@ -65,10 +66,6 @@ const fn ss_code(port: char) -> u8 {
 
 /// Marks a pin as a source line `N` can be pointed at, and carries the `EXTISS`
 /// code that points it there.
-///
-/// Populated from the line map: pin number and line number are the same, so the
-/// only thing left to state is which ports bond that number. A pin the package
-/// does not bond has no impl and so cannot be handed to [`ExtiLine::source`].
 pub trait ExtiPin: ExtiConfigured {
     /// Value written to this line's `EXTISS` field to select the pin's port.
     const SS_CODE: u8;
@@ -147,9 +144,7 @@ pub enum EdgeTrigger {
 /// drives it.
 ///
 /// `SRC` is [`PinSrc`] before a port is picked, the pin itself afterwards, and
-/// [`InternalSrc`] on the lines that have no pin. Cannot be constructed outside
-/// this module: the only lines that exist come from [`ExtiExt::split`], which is
-/// what makes a line a unique token.
+/// [`InternalSrc`] on the lines that have no pin.
 pub struct ExtiLine<const N: u8, SRC> {
     src: SRC,
 }
@@ -225,6 +220,9 @@ where
     ///
     /// `RTEN` and `FTEN` are independent, so a line with neither set is left
     /// firing only from software.
+    ///
+    /// Read-modify-write on registers shared by every line: when lines are
+    /// configured from different contexts, put the call in a critical section.
     pub fn edge(&mut self, edge: EdgeTrigger) {
         let (rising, falling) = match edge {
             EdgeTrigger::None => (false, false),
@@ -240,10 +238,16 @@ where
     ///
     /// One vector serves several lines, so a handler still has to ask which of
     /// them is pending.
+    ///
+    /// Read-modify-write on a register shared by every line: when lines are
+    /// configured from different contexts, put the call in a critical section.
     pub fn listen(&mut self) {
         self.set_inten(true);
     }
     /// Stops the line reaching the NVIC. The pending flag still latches.
+    ///
+    /// Read-modify-write on a register shared by every line: when lines are
+    /// configured from different contexts, put the call in a critical section.
     pub fn unlisten(&mut self) {
         self.set_inten(false);
     }
@@ -256,10 +260,16 @@ where
     ///
     /// An event enters no handler: it sets the core's event latch, which is
     /// what `WFE` waits on, and execution carries on from there.
+    ///
+    /// Read-modify-write on a register shared by every line: when lines are
+    /// configured from different contexts, put the call in a critical section.
     pub fn listen_event(&mut self) {
         self.set_even(true);
     }
     /// Stops the line raising events.
+    ///
+    /// Read-modify-write on a register shared by every line: when lines are
+    /// configured from different contexts, put the call in a critical section.
     pub fn unlisten_event(&mut self) {
         self.set_even(false);
     }
@@ -272,6 +282,9 @@ where
     ///
     /// `SWIEV` goes straight to the pending flag, so a line left on
     /// [`EdgeTrigger::None`] still fires this way.
+    ///
+    /// Read-modify-write on a register shared by every line: when lines are
+    /// configured from different contexts, put the call in a critical section.
     pub fn pend(&mut self) {
         self.reg()
             .swiev()
@@ -290,9 +303,7 @@ where
     /// Clears the pending flag.
     ///
     /// The request is a level, so a handler that returns without this is
-    /// entered again at once. `PD` clears by writing a one, which is why this
-    /// writes the bare mask instead of reading first: a zero elsewhere in the
-    /// word leaves that line's flag alone.
+    /// entered again at once.
     pub fn clear_interrupt(&mut self) {
         self.reg().pd().write(|w| unsafe { w.bits(Self::MASK) });
     }
@@ -314,9 +325,10 @@ impl<const P: char, const N: u8, MODE> ExtiLine<N, Pin<P, N, MODE>> {
     /// Gives the pin back and returns the line to its unsourced state.
     ///
     /// Disarms the line first — no edges, neither output, no pending flag — so
-    /// the next owner of the pin does not inherit an interrupt on it. `EXTISS`
-    /// keeps pointing at the port until another pin is handed in, which is
-    /// harmless while nothing listens.
+    /// the next owner of the pin does not inherit an interrupt on it.
+    ///
+    /// Read-modify-write on registers shared by every line: when lines are
+    /// configured from different contexts, put the call in a critical section.
     pub fn release(mut self) -> (ExtiLine<N, PinSrc>, Pin<P, N, MODE>)
     where
         Pin<P, N, MODE>: ExtiConfigured,
@@ -330,9 +342,6 @@ impl<const P: char, const N: u8, MODE> ExtiLine<N, Pin<P, N, MODE>> {
 }
 
 /// The EXTI lines, as handed out by [`ExtiExt::split`].
-///
-/// The reserved line numbers are absent: a number the hardware does not
-/// implement cannot be named rather than being rejected later.
 #[allow(missing_docs)]
 pub struct ExtiLines {
     pub line0: ExtiLine<0, PinSrc>,
@@ -371,9 +380,7 @@ pub trait ExtiExt {
     /// Hands out the lines.
     ///
     /// Consumes the peripheral, so the lines it returns are the only ones that
-    /// will ever exist. Takes no clock: EXTI has no enable bit of its own, and
-    /// the `EXTISS` half of the job lives in [`crate::syscfg::Syscfg`], which
-    /// switches on the clock it does need.
+    /// will ever exist.
     fn split(self) -> Self::Lines;
 }
 

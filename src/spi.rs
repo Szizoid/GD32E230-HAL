@@ -1,8 +1,8 @@
 //! SPI master.
 //!
-//! Covers both SPI0 and SPI1 in master, full-duplex, blocking mode with software
-//! NSS (chip select is an ordinary GPIO the caller toggles). Frames are 8 or 16
-//! bits wide, selected by a typestate parameter.
+//! Master, full-duplex, with software NSS (chip select is an ordinary GPIO the
+//! caller toggles). Frames are 8 or 16 bits wide, selected by a typestate
+//! parameter.
 //!
 //! Every operation is a simultaneous *exchange* — a word leaves on MOSI while
 //! another arrives on MISO — so [`SpiBus::read`] sends zeros and
@@ -44,8 +44,7 @@ pub mod fill {
 
 /// SCK prescaler: divides `pclk` down to the serial clock.
 ///
-/// Discriminants are the `PSC` register encoding. There is no universal default
-/// — the right divider depends on `pclk` and the slave's maximum clock.
+/// The right divider depends on `pclk` and the slave's maximum clock.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[allow(missing_docs)]
@@ -94,8 +93,8 @@ pub struct SpiConfig {
 impl SpiConfig {
     /// Creates a configuration with the given prescaler, Mode 0 and MSB-first.
     ///
-    /// The prescaler is a required argument and this type has no `Default`: an
-    /// SCK divider has no conventional value, so it must be chosen deliberately.
+    /// The prescaler is a required argument: an SCK divider has no conventional
+    /// value.
     pub const fn new(psc: SpiPsc) -> Self {
         Self {
             psc,
@@ -141,8 +140,7 @@ macro_rules! spi_pins {
 // GD32E230x8. They are therefore listed in the gated blocks, not here.
 //
 // The `pads_ge_*` gates say the package bonds the pin at all, and match the ones in
-// `gpio::Parts` — an entry for an unbonded pad would advertise in the docs a pin
-// nobody can obtain.
+// `gpio::Parts`.
 spi_pins!(
     pac::Spi0:
         SCK: ['A' 5 : 0, #[cfg(pads_ge_28)] 'B' 3 : 0]
@@ -177,8 +175,7 @@ pub struct Word;
 
 /// An error the peripheral flagged in `STAT`.
 ///
-/// Its own type rather than [`ErrorKind`], which has no variant for a CRC
-/// mismatch; [`kind`] gives the portable classification.
+/// [`kind`] gives the portable classification.
 ///
 /// [`kind`]: embedded_hal::spi::Error::kind
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -202,8 +199,7 @@ impl embedded_hal::spi::Error for Error {
         match self {
             Self::Overrun => ErrorKind::Overrun,
             Self::ModeFault => ErrorKind::ModeFault,
-            // No CRC variant exists upstream; this is the loss our own type
-            // is here to keep out of the driver-facing API.
+            // No CRC variant exists upstream.
             Self::Crc => ErrorKind::Other,
             Self::Framing => ErrorKind::FrameFormat,
         }
@@ -211,12 +207,6 @@ impl embedded_hal::spi::Error for Error {
 }
 
 /// A peripheral that [`Spi`] can drive.
-///
-/// SPI0 and SPI1 have distinct register block types whose bits do not line up —
-/// frame width is `FF16` in `CTL0` on SPI0 but `DZ` in `CTL1` on SPI1, where that
-/// position means something else. No generic bound over a shared block is
-/// possible, so this trait abstracts the peripheral at the *operation* level:
-/// every register access lives in the impls, and [`Spi`] touches none.
 pub trait Instance: Enable + Reset {
     /// Writes the full master configuration, leaving the peripheral enabled.
     ///
@@ -441,17 +431,16 @@ pub enum Event {
     /// `unlisten` from inside the handler once nothing is left to send.
     Tbe,
     /// Any of the `STAT` error flags, which share this one enable. Cleared by
-    /// [`take_error`](Instance::take_error), which a handler must call —
-    /// nothing else drains them.
+    /// [`take_error`](Spi::take_error), which a handler must call — nothing
+    /// else drains them.
     Error,
 }
 
 /// A configured SPI master, owning the peripheral and its three pins.
 ///
-/// `WORD` records the frame width, so methods of the wrong width don't exist:
-/// [`transfer_byte`](Self::transfer_byte) and `SpiBus<u8>` are available only on
-/// `Spi<.., Byte>`, [`transfer_word`](Self::transfer_word) and `SpiBus<u16>` only
-/// on `Spi<.., Word>`. It defaults to [`Byte`], so the parameter can be omitted.
+/// `WORD` is the frame width: [`transfer_byte`](Self::transfer_byte) and
+/// `SpiBus<u8>` live on `Spi<.., Byte>`, [`transfer_word`](Self::transfer_word)
+/// and `SpiBus<u16>` on `Spi<.., Word>`. Defaults to [`Byte`].
 ///
 /// Chip select is not handled here — NSS is software-managed, so drive the
 /// slave's CS with an ordinary output pin around each transaction.
@@ -472,9 +461,8 @@ where
 {
     /// Enables the peripheral's clock, resets it and configures 8-bit master mode.
     ///
-    /// The pins must already be in this SPI's alternate function; the bounds
-    /// reject anything else at compile time. [`release`](Spi::release) hands them
-    /// back.
+    /// The pins must already be in this SPI's alternate function;
+    /// [`release`](Spi::release) hands them back.
     pub fn new(
         rcu: &mut Rcu,
         mut spi: SPIX,
@@ -633,9 +621,8 @@ where
     ///
     /// # Panics
     ///
-    /// If the lengths differ. The bus trades a word for a word, so a longer
-    /// `read` would have nothing to clock out; what fills the wire is the
-    /// target's business, and [`fill`] names the usual levels.
+    /// If the lengths differ. To read more than is written, pad `write` —
+    /// [`fill`] names the usual levels.
     pub fn transfer_bytes(&mut self, read: &mut [u8], write: &[u8]) -> Result<(), Error> {
         assert!(
             read.len() == write.len(),
@@ -696,9 +683,8 @@ where
     ///
     /// # Panics
     ///
-    /// If the lengths differ. The bus trades a word for a word, so a longer
-    /// `read` would have nothing to clock out; what fills the wire is the
-    /// target's business, and [`fill`] names the usual levels.
+    /// If the lengths differ. To read more than is written, pad `write` —
+    /// [`fill`] names the usual levels.
     pub fn transfer_words(&mut self, read: &mut [u16], write: &[u16]) -> Result<(), Error> {
         assert!(
             read.len() == write.len(),

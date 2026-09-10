@@ -1,9 +1,7 @@
 //! Reset and clock unit: the system clock tree and per-peripheral clock gating.
 //!
 //! [`RcuExt::constrain`] hands out an [`UnfrozenRcu`], whose only method applies a
-//! [`ClockConfig`] and turns it into the [`Rcu`] every driver takes. Freezing
-//! writes the registers once and consumes the unfrozen value, so the tree is
-//! configured exactly once and the resulting [`Clocks`] are read-only afterwards.
+//! [`ClockConfig`] and turns it into the [`Rcu`] every driver takes.
 //!
 //! ```ignore
 //! let mut fmc = dp.fmc.constrain();
@@ -14,11 +12,9 @@
 //! let clocks = rcu.clocks();
 //! ```
 //!
-//! Peripheral clocks are gated through the [`Enable`] trait, which drivers call
-//! from their constructors, so a peripheral cannot be used unclocked. [`Reset`]
-//! is separate because not every peripheral has a reset bit — DMA has none.
+//! Drivers switch their peripheral's clock on themselves, through [`Enable`].
 //!
-//! `HXTAL` and `LXTAL` are not started — no crystal is fitted on the target board.
+//! `HXTAL` and `LXTAL` are never started.
 
 use crate::fmc::Fmc;
 use crate::pac;
@@ -38,10 +34,6 @@ const ADCPSC_MSB_APB2: bool = false;
 const ADCPSC_MSB_AHB: bool = true;
 
 /// Target system clock produced by the PLL, in 4 MHz steps up to the 72 MHz limit.
-///
-/// Named by frequency rather than multiplier: the PLL source is fixed
-/// (IRC8M/2 = 4 MHz), so the two map one-to-one. Only reachable frequencies
-/// exist, so an impossible request is a compile error, not a silent rounding.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[allow(missing_docs)]
@@ -68,9 +60,7 @@ pub enum PllFreq {
 /// Source of the system clock.
 ///
 /// [`Irc8m`](Self::Irc8m) means the reset state rather than a switch back to it:
-/// [`freeze`](UnfrozenRcu::freeze) leaves `SCS` alone, because lowering the clock
-/// after the flash wait states were already set for a higher one is exactly the
-/// order that must not happen.
+/// [`freeze`](UnfrozenRcu::freeze) leaves `SCS` alone.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum SysClk {
@@ -81,9 +71,6 @@ pub enum SysClk {
 }
 
 /// AHB prescaler: divides the system clock down to `hclk`.
-///
-/// Named by the divider, not the resulting frequency, because `sysclk` varies
-/// with configuration; every variant is legal at any `sysclk`.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[allow(missing_docs)]
@@ -136,9 +123,6 @@ pub enum Irc28mDiv {
 }
 
 /// Source of the ADC clock.
-///
-/// Each branch carries its own divider inside the variant, so a divider can't be
-/// specified for the branch it doesn't belong to.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum AdcSel {
@@ -162,18 +146,13 @@ pub enum Usart0Sel {
     /// The 32.768 kHz crystal.
     ///
     /// Selecting this without starting `LXTAL` leaves USART0 unclocked, and its
-    /// blocking reads and writes will never return. The HAL cannot know what is
-    /// fitted on a given board, so this is left to the caller.
+    /// blocking reads and writes will never return.
     Lxtal,
     /// The internal 8 MHz RC oscillator, independent of the system clock.
     Irc8m,
 }
 
 /// Frozen clock frequencies, produced by [`UnfrozenRcu::freeze`].
-///
-/// Passed by value into the drivers that need it (USART for its baud divisor,
-/// ADC for its calibration delay). There are no setters — once frozen, the tree
-/// matches what was actually written to the registers.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Clocks {
@@ -238,9 +217,9 @@ impl Clocks {
 
 /// Builder for the clock tree, applied by [`freeze`](UnfrozenRcu::freeze).
 ///
-/// [`Default`] holds the reset state in one place — undivided buses, IRC8M as the
-/// system clock, USART0 on APB2 and no ADC clock — and every field is written to
-/// its registers whether it was named or not.
+/// [`Default`] is the reset state: undivided buses, IRC8M as the system clock,
+/// USART0 on APB2 and no ADC clock. Every field is written to its registers
+/// whether it was named or not.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct ClockConfig {
@@ -298,8 +277,7 @@ impl ClockConfig {
     /// Picks the ADC clock source and starts it if needed.
     ///
     /// Left at [`AdcSel::Off`] the ADC has no clock and [`Clocks::ck_adc`] stays
-    /// zero — constructing an [`Adc`](crate::adc::Adc) would then divide by zero
-    /// rather than silently hang in calibration.
+    /// zero — constructing an [`Adc`](crate::adc::Adc) then panics.
     pub const fn adc_sel(mut self, sel: AdcSel) -> Self {
         self.adc_sel = sel;
         self
@@ -307,10 +285,6 @@ impl ClockConfig {
 }
 
 /// The RCU before its clock tree is frozen, handed out by [`RcuExt::constrain`].
-///
-/// [`freeze`](Self::freeze) is the only thing it does, and it consumes this
-/// value — so the tree is configured exactly once, and every driver, which takes
-/// [`Rcu`], can only be built afterwards.
 pub struct UnfrozenRcu {
     rcu: pac::Rcu,
 }
@@ -320,7 +294,6 @@ impl UnfrozenRcu {
     ///
     /// Flash wait states are raised from the new `hclk` *before* the system clock
     /// switches over, so the flash is never read faster than it can respond.
-    /// `fmc` is taken because those wait states live in a separate peripheral.
     pub fn freeze(self, fmc: &mut Fmc, config: ClockConfig) -> Rcu {
         let sysclk = match config.sysclk {
             SysClk::Irc8m => IRC8M,
@@ -495,9 +468,7 @@ pub enum PllDiv {
 
 /// Clock node to route out on the `CK_OUT` pin.
 ///
-/// The PLL branch carries its own pre-multiplexer divider inside the variant, so
-/// it cannot be set for a source it doesn't apply to. Selecting a source that
-/// isn't running simply leaves the pin quiet.
+/// Selecting a source that isn't running leaves the pin quiet.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum CkOutSrc {
@@ -536,8 +507,7 @@ pub enum CkOutDiv {
 
 /// What brought the chip up, as recorded in `RSTSCK`.
 ///
-/// Independent flags rather than one cause: several can stand after a single
-/// reset, and nothing clears any of them but
+/// Several can stand after a single reset, and nothing clears them but
 /// [`clear_reset_flags`](Rcu::clear_reset_flags).
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -560,9 +530,6 @@ pub enum ResetFlag {
 
 /// Owns the RCU peripheral with its clock tree already frozen; obtained from
 /// [`UnfrozenRcu::freeze`].
-///
-/// Every driver takes this type, so none of them can be built before the tree is
-/// configured — there is no other way to get one.
 pub struct Rcu {
     rcu: pac::Rcu,
     clocks: Clocks,
@@ -577,7 +544,7 @@ impl Rcu {
     /// Routes an internal clock node out onto `PA8` (AF0) or `PA9` (AF5).
     ///
     /// The pin still has to be put into the matching alternate function. Applied
-    /// immediately and not recorded in [`Clocks`] — nothing else needs it.
+    /// immediately and not recorded in [`Clocks`].
     pub fn ck_out(&mut self, src: CkOutSrc, div: CkOutDiv) {
         self.rcu.cfg0().modify(|_, w| {
             let w = match div {
@@ -610,9 +577,6 @@ impl Rcu {
     }
 
     /// Starts the internal 40 kHz oscillator and blocks until it is stable.
-    ///
-    /// Its frequency is fixed and does not depend on the clock tree, so nothing
-    /// is recorded in [`Clocks`].
     pub fn enable_irc40k(&mut self) {
         self.rcu.rstsck().modify(|_, w| w.irc40ken().on());
         while self.rcu.rstsck().read().irc40kstb().is_not_ready() {}
@@ -626,8 +590,7 @@ impl Rcu {
 
     /// Clocks SYSCFG and the comparator.
     ///
-    /// `CFGCMPEN` gates both blocks at once, so this is not [`Enable`]: naming the
-    /// pair is the only warning that the peripheral next door goes with it.
+    /// `CFGCMPEN` gates both blocks at once.
     pub fn enable_cfgcmp(&mut self) {
         self.rcu.apb2en().modify(|_, w| w.cfgcmpen().enabled());
     }
@@ -684,9 +647,6 @@ impl RcuExt for pac::Rcu {
 }
 
 /// Clock gating for a peripheral, implemented per peripheral type.
-///
-/// Drivers call [`enable`](Enable::enable) from their constructors, so a
-/// peripheral cannot be used before its clock is running.
 pub trait Enable {
     /// Switches the peripheral's clock on.
     fn enable(rcu: &mut Rcu);

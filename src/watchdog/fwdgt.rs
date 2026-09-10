@@ -4,9 +4,7 @@
 //! system clock does, and resets the chip unless it is fed before the counter
 //! reaches zero.
 //!
-//! Starting it is irreversible — the hardware has no way to stop it — so
-//! [`start`](Fwdgt::start) consumes [`Fwdgt`] and [`FwdgtRunning`] offers no way
-//! back.
+//! Starting it is irreversible: the hardware has no way to stop it.
 
 use crate::pac;
 use crate::rcu::{IRC40K, Rcu};
@@ -46,7 +44,7 @@ impl FwdgtPsc {
         Self::Div256,
     ];
 
-    /// The divider itself, derived from the `PSC` code so the two cannot part ways.
+    /// The divider itself, derived from the `PSC` code.
     const fn divider(self) -> u32 {
         4 << (self as u8)
     }
@@ -55,10 +53,9 @@ impl FwdgtPsc {
 /// Splits a timeout given in IRC40K ticks into the smallest divider that spans
 /// it and the reload value to go with it.
 ///
-/// The smallest divider is the one with the finest resolution, so the realised
-/// timeout sits as close under the requested one as the hardware allows —
-/// division truncates, and for a watchdog erring short is the safe direction.
-/// Past what the dividers reach (26 s) both saturate.
+/// The smallest divider has the finest resolution, so the realised timeout sits
+/// as close under the requested one as the hardware allows. Past what the
+/// dividers reach (26 s) both saturate.
 fn dividers(ticks: u32) -> (FwdgtPsc, u16) {
     let ticks = ticks.max(1);
     for psc in FwdgtPsc::ALL {
@@ -92,8 +89,7 @@ impl Fwdgt {
     ///
     /// # Panics
     ///
-    /// If `rld` exceeds 12 bits. Masking it silently would hand back a working
-    /// watchdog with a period nobody asked for.
+    /// If `rld` exceeds 12 bits.
     pub fn start(self, psc: FwdgtPsc, rld: u16) -> FwdgtRunning {
         assert!(rld <= RLD_MAX, "FWDGT reload must fit in 12 bits");
         self.fwdgt.ctl().write(|w| w.cmd().enable());
@@ -124,8 +120,8 @@ impl Fwdgt {
 
 /// The watchdog once it is counting down.
 ///
-/// No way out by design: the hardware cannot stop it, and neither the
-/// peripheral nor the period can be recovered.
+/// No way out: the hardware cannot stop it, and neither the peripheral nor the
+/// period can be recovered.
 pub struct FwdgtRunning {
     fwdgt: pac::Fwdgt,
 }
@@ -134,20 +130,17 @@ impl FwdgtRunning {
     /// Reloads the counter, postponing the reset by one full period.
     ///
     /// The manual requires 7 or more IRC40K cycles (~175 µs) between two
-    /// reloads; nothing here enforces it, since the watchdog exposes no counter
-    /// to read and timing it off the system clock would tie it to the very
-    /// clock it is meant to survive.
+    /// reloads; nothing here enforces it.
     pub fn feed(&mut self) {
         self.fwdgt.ctl().write(|w| w.cmd().reset());
     }
 }
 
-/// Entry point on the raw peripheral, mirroring [`GpioExt`](crate::gpio::GpioExt).
+/// Entry point on the raw peripheral.
 pub trait FwdgtExt {
     /// Starts IRC40K, which clocks the watchdog, and takes the peripheral.
     ///
-    /// Nothing is written to the watchdog itself — its registers stay write
-    /// protected until [`start`](Fwdgt::start) opens them.
+    /// Nothing is written to the watchdog itself.
     fn constrain(self, rcu: &mut Rcu) -> Fwdgt;
 }
 

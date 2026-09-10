@@ -1,12 +1,9 @@
 //! General-purpose I/O.
 //!
-//! A pin's port, number and mode all live in its type, so the compiler rejects
-//! whatever the current mode doesn't support: an [`Input`] pin has no
-//! `set_high`, and an alternate function the pin doesn't have won't compile.
+//! A pin's port, number and mode all live in its type.
 //!
-//! Pins are handed out by [`GpioExt::split`], which consumes the port and
-//! enables its clock, so a pin can neither be obtained twice nor used unclocked.
-//! Modes are changed with the `into_*` methods, each returning a new type.
+//! Pins are handed out by [`GpioExt::split`]. Modes are changed with the
+//! `into_*` methods, each returning a new type.
 //!
 //! ```ignore
 //! let parts = dp.gpioa.split(&mut rcu);
@@ -15,8 +12,8 @@
 //! let tx = parts.pa9.into_alternate::<1>();
 //! ```
 //!
-//! Two modes are special. `PA13`/`PA14` start as [`Debugger`], since after reset
-//! they really are wired to SWD; leaving that goes through the separate
+//! Two modes are special. `PA13`/`PA14` start as [`Debugger`], since after
+//! reset they really are wired to SWD; leaving that goes through the separate
 //! `activate_into_*()` family. [`Pin::lock`] freezes a configuration until the
 //! next chip reset, which the type reflects as [`Locked`] — with no way back,
 //! since the hardware has none either.
@@ -32,8 +29,7 @@ use crate::rcu::Rcu;
 /// `CTL` field encoding: what the pin is wired to.
 ///
 /// A distinct type from [`Omode`] so the two cannot be passed to each other's
-/// setter — both are two-bit-or-less fields of the same port, and `u32` let a swap
-/// compile into a write on the neighbouring pin.
+/// setter.
 enum Ctl {
     Input = 0b00,
     Output = 0b01,
@@ -62,17 +58,17 @@ pub struct Analog;
 /// Mode: alternate function `AF`, routing the pin to a peripheral, driven as
 /// `OTYPE` ([`PushPull`] or [`OpenDrain`]).
 ///
-/// The output type is part of the mode because some peripherals accept only one:
-/// I²C needs open-drain lines, and a push-pull pin there fights whoever pulls the
-/// line low. Drivers bind to the type they need. Defaults to [`PushPull`].
+/// The output type is part of the mode because some peripherals accept only
+/// one: I²C needs open-drain lines, and a push-pull pin there fights whoever
+/// pulls the line low. Drivers bind to the type they need. Defaults to
+/// [`PushPull`].
 pub struct Alternate<const AF: u8, OTYPE = PushPull> {
     _otype: PhantomData<OTYPE>,
 }
 /// Mode: serial-wire debug, the reset state of `PA13`/`PA14`.
 ///
-/// Deliberately not [`Input`]: those pins are genuinely driving SWD out of reset.
-/// The mode is not [`Active`], so the ordinary `into_*` do not reach it — leaving
-/// it goes through [`Pin::activate`] or one of its `activate_into_*` siblings.
+/// Leaving it goes through [`Pin::activate`] or one of its `activate_into_*`
+/// siblings.
 pub struct Debugger;
 /// Mode: configuration frozen until the next chip reset, wrapping the mode it
 /// was locked in.
@@ -85,17 +81,11 @@ pub struct Locked<MODE> {
 
 /// A single pin: `P` is the port (`'A'`, `'B'`, `'C'` or `'F'`), `N` the pin
 /// number.
-///
-/// Zero-sized — the identity lives entirely in the type, so passing a pin around
-/// costs nothing at runtime.
 pub struct Pin<const P: char, const N: u8, MODE> {
     _mode: PhantomData<MODE>,
 }
 
 /// Which port an [`ErasedPin`] came from.
-///
-/// Only the ports this package bonds — a pin of any other port cannot be
-/// constructed, so the enum has nothing to say about them.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[allow(missing_docs)]
@@ -161,10 +151,6 @@ pub enum Speed {
 }
 
 /// Marks `AF` as a valid alternate function number for this pin.
-///
-/// Populated from the datasheet's pin table, so [`Pin::into_alternate`] rejects
-/// a number the pin doesn't have. Which numbers are valid depends on the chip
-/// variant feature.
 pub trait ValidAf<const AF: u8> {}
 
 // Recursive, one row per step, and with the gated row spelled out as its own rule:
@@ -196,16 +182,7 @@ macro_rules! pin_af {
 //   (1) GD32E230x4 only          -> cfg `chip_x4`
 //   (2) GD32E230x8/6             -> cfg `chip_x6` or `chip_x8`
 //   (3) GD32E230x8 only          -> cfg `chip_x8`
-// The cfgs come from build.rs, which derives them from the part's flash code, so
-// a gate names the die rather than each of the parts sharing it.
-// AF numbers that exist on every variant live in the common block below, even
-// where the function behind them differs (PA2 AF1 is USART0_TX on x4, USART1_TX
-// on x8) — `ValidAf` gates the number alone. Which peripheral a pin belongs to is
-// decided by `usart_pins!` / `spi_pins!` / `i2c_pins!`, gated the same way.
-//
-// The function name beside each number is the datasheet's, and it becomes the
-// docstring of the impl it produces — so what a number means is data here, not a
-// comment that can drift out of step with the list beside it.
+// The cfgs come from build.rs, which derives them from the part's flash code.
 pin_af! {
     // ---- Port A ----
     'A' 0  => [1: "USART0_CTS on x4, USART1_CTS on x6/x8", 7: "CMP_OUT"],
@@ -258,12 +235,7 @@ pin_af! {
     'B' 14 => [2: "TIMER0_CH1_ON"],
     #[cfg(pads_ge_48)]
     'B' 15 => [2: "TIMER0_CH2_ON"],
-    // NB: 'B' 10 has no variant-independent AF — every one of its functions is
-    // footnoted, so it appears only in the gated blocks below.
     // ---- Port F ----
-    // The port has one function per pin, which is why `gpiof` in the PAC carries
-    // no `AFSEL0`/`AFSEL1` at all; the silicon does have them, and `reg()` reaches
-    // them by going through the port A register block.
     'F' 0  => [1: "I2C0_SDA"],
     'F' 1  => [1: "I2C0_SCL"],
 }
@@ -340,9 +312,6 @@ pin_af! {
 }
 
 /// Marks a mode whose pin may be reconfigured.
-///
-/// [`Debugger`] and [`Locked`] deliberately don't implement it, which is what
-/// makes the `into_*` methods and the setters unavailable on them.
 pub trait Active {}
 
 impl Active for Input {}
@@ -352,7 +321,7 @@ impl<OTYPE> Active for Output<OTYPE> {}
 
 /// Marks a pin on a port that has a `LOCK` register, gating [`Pin::lock`].
 ///
-/// Ports A and B have one; port F does not.
+/// Ports A and B have one; ports C and F do not.
 pub trait HasLock {}
 impl<const N: u8, MODE> HasLock for Pin<'A', N, MODE> {}
 impl<const N: u8, MODE> HasLock for Pin<'B', N, MODE> {}
@@ -360,13 +329,10 @@ impl<const N: u8, MODE> HasLock for Pin<'B', N, MODE> {}
 /// Ways out of [`Debugger`], each giving up debug access on this pin.
 ///
 /// Every one of them writes the mode itself rather than merely relabelling the
-/// type, so the pin never sits in a state its type misdescribes. The `activate_`
-/// prefix is the whole point: an SWD pin cannot be reconfigured by accident
-/// through the ordinary `into_*`, which [`Debugger`] does not reach.
+/// type, so the pin never sits in a state its type misdescribes.
 ///
-/// Losing SWD is not a memory-safety matter, so none of this is `unsafe` — the
-/// cost is a board that stops answering the probe until the next reset, which
-/// the name is there to announce.
+/// The `activate_` prefix announces the cost: once the pin leaves SWD, the board
+/// stops answering the probe until the next reset.
 impl<const P: char, const N: u8> Pin<P, N, Debugger> {
     /// Releases the pin as a digital input.
     pub fn activate_into_input(mut self) -> Pin<P, N, Input> {
@@ -607,9 +573,6 @@ where
     }
     /// Routes the pin to a peripheral through alternate function `AF`, driven
     /// push-pull.
-    ///
-    /// Only numbers this pin has will compile — see [`ValidAf`] — and the number
-    /// stays in the returned type, so a driver can demand the exact function.
     pub fn into_alternate<const AF: u8>(mut self) -> Pin<P, N, Alternate<AF>>
     where
         Self: ValidAf<AF>,
@@ -617,8 +580,8 @@ where
         self.set_alternate(AF as u32, Omode::PushPull);
         Pin { _mode: PhantomData }
     }
-    /// Same, but leaves the pin open-drain: [`I2c`](crate::i2c::I2c) accepts only
-    /// pins that went through here.
+    /// Same, but leaves the pin open-drain: [`I2c`](crate::i2c::I2c) accepts
+    /// only pins that went through here.
     pub fn into_alternate_open_drain<const AF: u8>(mut self) -> Pin<P, N, Alternate<AF, OpenDrain>>
     where
         Self: ValidAf<AF>,
@@ -649,8 +612,7 @@ where
     ///
     /// Trades knowing which pin this is for a type shared with every other erased
     /// pin, so they can be collected into an array. Nothing is written; the
-    /// configuration stands. One way only — recovering `Pin<'A', 5, _>` would be
-    /// a runtime check returning `Option`, which buys nothing.
+    /// configuration stands. One way only.
     pub fn erase(self) -> ErasedPin<MODE> {
         ErasedPin {
             port: Port::from_char(P),
@@ -740,7 +702,7 @@ impl<OTYPE> ErasedPin<Output<OTYPE>> {
     pub fn set_low(&mut self) {
         set_bc(self.port, self.number);
     }
-    /// Flips the pin, atomically against the rest of the port.
+    /// Inverts the driven level.
     pub fn toggle(&mut self) {
         set_tg(self.port, self.number);
     }
@@ -986,13 +948,10 @@ macro_rules! gpio {
         $( $(#[$cfg:meta])? $name:ident : $num:literal : $mode:ty ),+ $(,)?
     ]) => {
         /// The pins of this port, in their reset modes.
-        ///
-        /// Only the pads the selected package bonds are here — a pin absent from
-        /// this struct cannot be reached at all.
+        #[allow(missing_docs)]
         pub struct $Parts {
             $(
                 $(#[$cfg])?
-                #[doc = concat!("Pin ", stringify!($name), ".")]
                 pub $name: Pin<$P, $num, $mode>,
             )+
         }
@@ -1014,9 +973,7 @@ macro_rules! gpio {
 
 // Which pads a package bonds, from the pinout figures 2-2 … 2-9 of the datasheet.
 // The sets nest — 20 ⊂ 24 ⊂ 28 ⊂ LQFP32 ⊂ QFN32 ⊂ 48 — so each pin carries one gate,
-// naming the smallest package that has it; `pads_ge_*` comes from build.rs. A pin
-// missing from its `Parts` is unreachable, which is the point: the alternative is a
-// HAL promising a pad the package never brought out.
+// naming the smallest package that has it; `pads_ge_*` comes from build.rs.
 gpio!(PartsA, pac::Gpioa, 'A', [
     pa0:0:Input,
     pa1:1:Input,

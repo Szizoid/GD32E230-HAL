@@ -2,8 +2,7 @@
 //!
 //! Word width is a typestate: a [`Usart<.., Byte>`](Usart) moves `u8` values and
 //! is what [`new`](Usart::new) builds, while [`new_word`](Usart::new_word) gives a
-//! `Usart<.., Word>` for raw 9-bit frames carrying `u16`. Methods of the other
-//! width don't exist on either, so the two can't be mixed up.
+//! `Usart<.., Word>` for raw 9-bit frames carrying `u16`.
 //!
 //! ```ignore
 //! let tx = parts.pa9.into_alternate::<1>();
@@ -12,9 +11,8 @@
 //! serial.write_byte(b'x');
 //! ```
 //!
-//! Which pins are valid depends on the chip variant — on the x8 part `PA2`/`PA3`
-//! reach USART1, not USART0 — but that is settled at compile time by the pin
-//! bounds, so a wrong pin simply fails to build.
+//! Which pins are valid depends on the chip variant: on x6/x8 `PA2`/`PA3` reach
+//! USART1, not USART0.
 //!
 //! A receiver just built takes the first frame apart wrongly unless the line has
 //! been idle for a frame beforehand, and with frames arriving back to back the
@@ -58,8 +56,7 @@ macro_rules! usart_pins {
 // GD32E230x8/6. They are therefore listed in the gated blocks, not here.
 //
 // The `pads_ge_*` gates say the package bonds the pin at all, and match the ones in
-// `gpio::Parts` — an entry for an unbonded pad would advertise in the docs a pin
-// nobody can obtain.
+// `gpio::Parts`.
 usart_pins! {
     pac::Usart0:
         TX: [ 'A' 9:1, #[cfg(pads_ge_24)] 'B' 6:0 ]
@@ -85,8 +82,7 @@ usart_pins! {
 /// Supplies the clock frequency feeding a given USART.
 ///
 /// USART0 can be reclocked away from its bus (see
-/// [`Usart0Sel`](crate::rcu::Usart0Sel)), USART1 always runs off APB1. Resolving
-/// it per peripheral type keeps the baud divisor off the wrong frequency.
+/// [`Usart0Sel`](crate::rcu::Usart0Sel)), USART1 always runs off APB1.
 pub trait BusClocks {
     /// Returns the frequency actually clocking this USART.
     fn clock(clocks: &Clocks) -> Hertz;
@@ -145,7 +141,6 @@ pub enum Oversampling {
 
 /// Word length and parity, as a single setting.
 ///
-/// Named for the frame as the caller sees it, not for the register bits:
 /// `E7`/`O7` leave 7 data bits because parity replaces the top one, `E8`/`O8`
 /// keep all 8 by widening the frame to 9 bits. No `N7` exists — without parity a
 /// frame carries the full 8 bits, which is `N8`. For raw 9-bit words see
@@ -207,8 +202,8 @@ impl Default for UsartConfig {
 
 /// Configuration for [`Usart::new_word`].
 ///
-/// Deliberately has no frame-format field: the 9-bit path is always
-/// "9 data bits, no parity", so there would be nothing meaningful to choose.
+/// The 9-bit path is always 9 data bits, no parity, so there is no frame format
+/// to choose.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct UsartConfig9 {
@@ -290,11 +285,8 @@ pub struct Word;
 
 /// A line error the receiver reported for one frame.
 ///
-/// Its own type rather than a foreign `ErrorKind`, so what `STAT` distinguishes
-/// stays distinguishable. The portable classifications are one `kind` call away
-/// per ecosystem ([`embedded_hal_nb::serial::Error::kind`],
-/// [`embedded_io::Error::kind`]), both lossy — neither has a variant for every
-/// line condition named here.
+/// The portable classifications are one `kind` call away:
+/// [`embedded_hal_nb::serial::Error::kind`] and [`embedded_io::Error::kind`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[non_exhaustive]
@@ -372,10 +364,8 @@ pub enum Event {
 
 /// A configured USART, owning the peripheral and both pins.
 ///
-/// `WORD` records the word width, so methods of the wrong width don't exist:
-/// `write_byte`/`read_byte` are available only on `Usart<.., Byte>`, and
-/// `write_word`/`read_word` only on `Usart<.., Word>`. It defaults to [`Byte`],
-/// so the parameter can be omitted.
+/// `WORD` is the word width: `write_byte`/`read_byte` live on `Usart<..,
+/// Byte>`, `write_word`/`read_word` on `Usart<.., Word>`. Defaults to [`Byte`].
 pub struct Usart<USARTX, TX, RX, WORD = Byte> {
     usart: USARTX,
     tx_pin: TX,
@@ -461,12 +451,8 @@ where
         self.wait_tc();
     }
 
-    /// Lets `event` raise an interrupt.
-    ///
-    /// Half of what an interrupt takes: the request now reaches the NVIC, which
-    /// still has the line masked. Unmasking it — `NVIC::unmask` on the
-    /// peripheral's [`Interrupt`](crate::pac::Interrupt) — is the caller's, this
-    /// crate does not touch core registers.
+    /// Lets `event` raise an interrupt. Unmasking the line in the NVIC is the
+    /// caller's.
     ///
     /// No event needs a separate clear — each is acknowledged by the same call a
     /// handler makes to do its work: `Rbne` by [`read_byte`](Usart::read_byte),
@@ -585,9 +571,8 @@ where
 {
     /// Enables the peripheral's clock, resets it and configures 8-bit words.
     ///
-    /// The pins must already be in this USART's alternate function; the bounds
-    /// reject anything else at compile time. [`release`](Usart::release) hands
-    /// them back. The baud divisor comes from the frozen clocks in `rcu`.
+    /// The pins must already be in this USART's alternate function;
+    /// [`release`](Usart::release) hands them back.
     pub fn new(rcu: &mut Rcu, usart: USARTX, tx_pin: TX, rx_pin: RX, config: UsartConfig) -> Self {
         configure(rcu, &usart, config.baud, config.oversampling);
 

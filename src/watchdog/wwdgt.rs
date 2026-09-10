@@ -5,7 +5,7 @@
 //! still calling `feed` keeps a plain watchdog happy, but breaks the pace this
 //! one checks.
 //!
-//! Clocked from `PCLK1`, so unlike [`Fwdgt`](crate::fwdgt::Fwdgt) its timeout
+//! Clocked from `PCLK1`, so unlike [`Fwdgt`](crate::watchdog::Fwdgt) its timeout
 //! moves with the bus clock and spans tens of milliseconds rather than seconds.
 
 use crate::pac;
@@ -35,9 +35,7 @@ pub enum WwdgtPsc {
 ///
 /// # Panics
 ///
-/// If either value needs more than 6 bits, or if `win` exceeds `cnt`, which
-/// would leave the window open from the start and silently turn this into an
-/// ordinary watchdog.
+/// If either value needs more than 6 bits, or if `win` exceeds `cnt`.
 fn checked_bits(cnt: u8, win: u8) -> (u8, u8) {
     assert!(cnt <= TICKS_MAX, "WWDGT period must fit in 6 bits");
     assert!(win <= TICKS_MAX, "WWDGT window must fit in 6 bits");
@@ -65,9 +63,7 @@ impl Wwdgt {
     ///
     /// # Panics
     ///
-    /// If either value needs more than 6 bits, or if `win` exceeds `cnt`, which
-    /// would leave the window open from the start and silently turn this into an
-    /// ordinary watchdog.
+    /// If either value needs more than 6 bits, or if `win` exceeds `cnt`.
     pub fn start(self, psc: WwdgtPsc, cnt: u8, win: u8) -> WwdgtRunning {
         let (cnt, win) = checked_bits(cnt, win);
         self.wwdgt
@@ -85,8 +81,8 @@ impl Wwdgt {
 
 /// The watchdog once it is counting down.
 ///
-/// No way out by design: `WDGTEN` ignores a written zero and only a hardware
-/// reset clears it, so neither the peripheral nor the period comes back.
+/// No way out: `WDGTEN` ignores a written zero and only a hardware reset clears
+/// it, so neither the peripheral nor the period comes back.
 pub struct WwdgtRunning {
     wwdgt: pac::Wwdgt,
     cnt: u8,
@@ -95,19 +91,13 @@ pub struct WwdgtRunning {
 impl WwdgtRunning {
     /// Reloads the counter, which must happen inside the window: too early
     /// resets the chip exactly as too late does.
-    ///
-    /// The write puts a zero in `WDGTEN`, which hardware ignores — that bit
-    /// cannot be cleared by software at all.
     pub fn feed(&mut self) {
         self.wwdgt.ctl().write(|w| w.cnt().bits(self.cnt));
     }
     /// Changes the period and the window, taking effect at the next
     /// [`feed`](Self::feed).
     ///
-    /// The counter itself is left alone: writing it here would count as a
-    /// second feed, and one arriving straight after the last would land above
-    /// the new window and reset the chip. The new window reaches `CFG` at once,
-    /// so the next feed is already judged by it.
+    /// The new window applies at once, so the next feed is already judged by it.
     ///
     /// # Panics
     ///
@@ -139,12 +129,16 @@ impl WwdgtRunning {
     }
     /// Clears the flag, which a handler must do before returning — the flag is
     /// the request, and hardware never drops it.
+    ///
+    /// The flag rises again for as long as the counter sits at `0x40`, so a
+    /// handler that only clears it is entered over and over until the reset.
+    /// For exactly one entry, mask the line in the NVIC inside the handler.
     pub fn clear_interrupt(&mut self) {
         self.wwdgt.stat().write(|w| w.ewif().finished());
     }
 }
 
-/// Entry point on the raw peripheral, mirroring [`GpioExt`](crate::gpio::GpioExt).
+/// Entry point on the raw peripheral.
 pub trait WwdgtExt {
     /// Enables the peripheral's clock and resets it.
     ///

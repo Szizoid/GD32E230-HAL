@@ -1,11 +1,11 @@
 //! 12-bit analog-to-digital converter.
 //!
-//! Single-channel blocking conversions, software triggered. The ADC needs its own
-//! clock, which is *not* started by default — call
-//! [`ClockConfig::adc_sel`](crate::rcu::ClockConfig::adc_sel) before constructing an [`Adc`],
-//! or [`Clocks::ck_adc`](crate::rcu::Clocks::ck_adc) is zero and
-//! [`constrain`](AdcExt::constrain) panics on the division rather than hanging
-//! in calibration.
+//! Single-channel conversions, software triggered: blocking through
+//! [`Adc::read`], or started with [`Adc::start`] and collected with
+//! [`Adc::result`] on [`Event::Eoc`]. The ADC needs its own clock, which is
+//! *not* started by default — call
+//! [`ClockConfig::adc_sel`](crate::rcu::ClockConfig::adc_sel) before
+//! constructing an [`Adc`].
 //!
 //! ```ignore
 //! let config = ClockConfig::default().adc_sel(AdcSel::Prescaled(AdcPsc::Apb2Div8));
@@ -27,7 +27,9 @@ const VREFINT_CAL_BLANK: u16 = 0xFFFF;
 const VREFINT_TYP_MV: i32 = 1200;
 const NOMINAL_VDDA_MV: i32 = 3300;
 const ADC_MAX_CODE: i32 = 4095;
+/// Temperature sensor output at 25 °C.
 const V25_MV: i32 = 1450;
+/// Temperature sensor slope, 4.3 mV/°C, scaled by 10 to stay integer.
 const AVG_SLOPE_X10: i32 = 43;
 
 const TEMP_CHANNEL: u8 = 16;
@@ -75,8 +77,6 @@ macro_rules! channel {
     };
 }
 
-// PB0 is the only one of these the smallest package leaves unbonded; the gate
-// matches the one in `gpio::Parts`.
 channel!(
     'A' 0 => 0,
     'A' 1 => 1,
@@ -106,6 +106,8 @@ pub struct Adc {
 }
 
 impl Adc {
+    /// Returns the peripheral.
+    ///
     /// The clock is left enabled and no reset is performed — a later
     /// [`constrain`](AdcExt::constrain) does both anyway.
     pub fn release(self) -> pac::Adc {
@@ -136,7 +138,6 @@ impl Adc {
     fn set_internal_channel(&mut self, channel: u8) {
         self.set_channel(channel);
     }
-    // Cycles239_5 / ck_adc >= 17.1 us, with both sides scaled by 10 to stay integer.
     fn sample_time_sufficient(&self) -> bool {
         TEMP_MIN_SAMPTIME_US_X10 * self.clocks.ck_adc().to_Hz() as u64
             <= MAX_SAMPTIME_CYCLES_X10 * US_PER_S
@@ -172,10 +173,9 @@ impl Adc {
         result
     }
 
-    /// Triggers a conversion, blocking only until the trigger is acknowledged
-    /// — not until it finishes. Pairs with [`listen`](Self::listen) and
-    /// [`result`](Self::result) for the interrupt-driven path: this starts a
-    /// conversion without blocking on `EOC` at all.
+    /// Triggers a conversion, blocking only until the trigger is acknowledged —
+    /// not until it finishes. Pairs with [`listen`](Self::listen) and
+    /// [`result`](Self::result) for the interrupt-driven path.
     pub fn start<PIN: Channel>(&mut self, _pin: &PIN, time: SampTime) {
         self.set_channel(PIN::CHANNEL);
         self.set_sample_time(PIN::CHANNEL, time);
@@ -214,12 +214,11 @@ impl Adc {
     }
     /// Reads the internal temperature sensor, in tenths of a degree Celsius.
     ///
-    /// Scaled against the real supply from [`read_vref`](Self::read_vref) rather
-    /// than a nominal 3.3 V, in fixed point.
+    /// Scaled against the real supply from [`read_vref`](Self::read_vref).
     ///
     /// Returns `None` when `CK_ADC` runs too fast for the sensor's minimum
-    /// sampling time: [`SampTime`] is counted in cycles, so above roughly 14 MHz
-    /// even the longest no longer spans the required 17.1 µs.
+    /// sampling time: [`SampTime`] is counted in cycles, so above roughly 14
+    /// MHz even the longest no longer spans the required 17.1 µs.
     pub fn read_temperature(&mut self) -> Option<i32> {
         if !self.sample_time_sufficient() {
             return None;
@@ -257,7 +256,7 @@ impl Adc {
     }
 }
 
-/// Entry point on the raw peripheral, mirroring [`GpioExt`](crate::gpio::GpioExt).
+/// Entry point on the raw peripheral.
 pub trait AdcExt {
     /// Enables the peripheral, powers it up and runs the calibration sequence.
     ///
@@ -265,9 +264,10 @@ pub trait AdcExt {
     ///
     /// # Panics
     ///
-    /// If the ADC clock was never selected — [`Clocks::ck_adc`](crate::rcu::Clocks::ck_adc)
-    /// is then zero and the calibration delay divides by it. Configure the clock
-    /// with [`ClockConfig::adc_sel`](crate::rcu::ClockConfig::adc_sel) first.
+    /// If the ADC clock was never selected —
+    /// [`Clocks::ck_adc`](crate::rcu::Clocks::ck_adc) is then zero and the
+    /// calibration delay divides by it. Configure the clock with
+    /// [`ClockConfig::adc_sel`](crate::rcu::ClockConfig::adc_sel) first.
     fn constrain(self, rcu: &mut Rcu) -> Adc;
 }
 

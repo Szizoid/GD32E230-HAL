@@ -1,4 +1,13 @@
 //! Analog comparator.
+//!
+//! ```ignore
+//! let parts = dp.gpioa.split(&mut rcu);
+//! let pos = parts.pa1.into_analog();
+//! let config = CmpConfig::new(Speed::High);
+//! let cmp = Cmp::new(&mut rcu, dp.cmp, pos, VrefintHalf, config).enable();
+//! cortex_m::asm::delay(4_800);
+//! let above = cmp.output();
+//! ```
 
 use core::marker::PhantomData;
 
@@ -7,8 +16,6 @@ use crate::pac;
 use crate::rcu::Rcu;
 
 /// Hysteresis on the comparator output, suppressing chatter near the threshold.
-///
-/// Discriminants are the `CMPxHST` encoding.
 #[allow(missing_docs)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -21,9 +28,9 @@ pub enum Hysteresis {
 
 /// A source the inverting input can be tied to.
 ///
-/// `MSEL` is the `CMPxMSEL` encoding. Implemented by the four internal reference
-/// taps and by the four pins the multiplexer reaches, each only in [`Analog`] —
-/// the manual requires that mode before a pin is selected as an input.
+/// Implemented by the four internal reference taps and by the four pins the
+/// multiplexer reaches, each only in [`Analog`] — the manual requires that mode
+/// before a pin is selected as an input.
 ///
 /// `VREFINT` is 1.2 V, so the taps sit at 0.3, 0.6, 0.9 and 1.2 V.
 pub trait InvertingInput {
@@ -67,10 +74,11 @@ impl InvertingInput for Pin<'A', 2, Analog> {
 
 /// What the non-inverting input consists of.
 ///
-/// `SW` is the `CMPxSW` state. `PA1` is the only pin wired to this input; handing
-/// over `PA4` as well closes the switch and ties the two together, which is why
-/// the pair is a separate implementor. Owning `PA4` here is what keeps it from
-/// also serving as the [`InvertingInput`] and shorting both inputs together.
+/// `SW` is the `CMPxSW` state. `PA1` is the only pin wired to this input;
+/// handing over `PA4` as well closes the switch and ties the two together,
+/// which is why the pair is a separate implementor. Owning `PA4` here is what
+/// keeps it from also serving as the [`InvertingInput`] and shorting both
+/// inputs together.
 pub trait NonInvertingInput {
     /// Whether `CMPxSW` is closed for this source.
     const SW: bool;
@@ -85,7 +93,6 @@ impl NonInvertingInput for (Pin<'A', 1, Analog>, Pin<'A', 4, Analog>) {
 
 /// Where the comparator output is routed on top of the pin.
 ///
-/// Discriminants are the `CMPxOSEL` encoding; `0b100` and `0b101` are reserved.
 /// Enable the comparator before configuring the timer channel that captures it.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -105,9 +112,6 @@ pub enum OutputSel {
 }
 
 /// Propagation delay traded against current draw.
-///
-/// Discriminants are the `CMPxM` encoding. Speed and power move together, so one
-/// axis names the variant.
 #[allow(missing_docs)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -120,8 +124,8 @@ pub enum Speed {
 
 /// Polarity of the comparator output.
 ///
-/// Discriminants are the `CMPxPL` encoding. It affects the pin, EXTI and the
-/// timer, but not [`CmpRunning::output`], which is read off the raw comparison.
+/// Affects the pin, EXTI and the timer, but not [`CmpRunning::output`], which
+/// is read off the raw comparison.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Polarity {
@@ -151,8 +155,8 @@ impl CmpConfig {
     /// Creates a configuration with the given speed, no hysteresis, no output
     /// routing and a non-inverted output.
     ///
-    /// Speed is a required argument and this type has no `Default`: it trades
-    /// propagation delay against current draw, and neither choice is universal.
+    /// Speed is a required argument: it trades propagation delay against current
+    /// draw, and neither choice is universal.
     pub const fn new(speed: Speed) -> Self {
         Self {
             speed,
@@ -269,8 +273,8 @@ impl<POS, INV> CmpRunning<POS, INV, Unlocked> {
 impl<POS, INV, LOCKED> CmpRunning<POS, INV, LOCKED> {
     /// Whether the non-inverting input is above the inverting one.
     ///
-    /// `CMPxO` is taken before the polarity multiplexer, so [`Polarity`] does not
-    /// show up here — only on the pin, EXTI and the timer.
+    /// `CMPxO` is taken before the polarity multiplexer, so [`Polarity`] does
+    /// not show up here — only on the pin, EXTI and the timer.
     pub fn output(&self) -> bool {
         self.cmp.cs().read().cmpo().bit_is_set()
     }

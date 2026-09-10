@@ -1,16 +1,14 @@
 //! Hardware abstraction layer for the GD32E23x series (Cortex-M23), built on top
-//! of the [`gd32e2`] peripheral access crate. Only the GD32E230 is implemented so
-//! far; the crate is named for the family it is meant to grow into.
+//! of the [`gd32e2`](https://crates.io/crates/gd32e2) peripheral access crate.
+//! Only the GD32E230 is implemented so far; the crate is named for the family it
+//! is meant to grow into.
 //!
-//! The API leans on the type system: a pin's port, number and mode live in its
-//! type, so an invalid alternate function or a method that makes no sense for the
-//! current mode fails to compile rather than misbehaving on the board.
+//! The API leans on the type system: a method that makes no sense for the
+//! hardware fails to compile.
 //!
 //! # Chip variants
 //!
-//! One feature names the part being built for, and exactly one must be enabled;
-//! zero or several is an error rather than a silently wrong pin map. There is no
-//! default: which part sits on a board is not something this crate can assume.
+//! One feature names the part being built for, and exactly one must be enabled.
 //!
 //! A feature is the part number with an `x` in each field the code cannot see, so
 //! `gd32e230g8xx` is every G8 part: the letter is the bonded pin count (F 20, E 24,
@@ -19,13 +17,6 @@
 //! parts spell their package out — a QFN32 (`gd32e230k8ux`) carries VSS on its
 //! thermal pad and gives the two freed pins to `PB2` and `PB8`, an LQFP32
 //! (`gd32e230k8tx`) does not.
-//!
-//! Every named field reaches the code. The flash code decides the
-//! alternate-function map, where the same pin at the same AF number can reach a
-//! different peripheral (`PA2` AF1 is `USART0_TX` on x4 but `USART1_TX` on x8);
-//! the bonded pads decide which pins exist at all. `build.rs` also writes the
-//! `memory.x` the linker needs, so a project using this HAL does not supply one —
-//! though a `memory.x` in its own root still takes precedence.
 //!
 //! # Getting started
 //!

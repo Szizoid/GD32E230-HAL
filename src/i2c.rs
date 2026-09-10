@@ -1,8 +1,8 @@
 //! I²C master.
 //!
-//! Blocking, 7-bit addressing, both peripherals. Transactions are `write`,
-//! `read` and `write_read` (the last joined by a repeated START); both lines
-//! must be open-drain, which the pin bounds enforce.
+//! 7-bit addressing. Transactions are `write`, `read` and `write_read` (the
+//! last joined by a repeated START), blocking or driven by interrupts; both
+//! lines must be open-drain.
 //!
 //! ```ignore
 //! let sda = parts.pb7.into_alternate_open_drain::<1>();
@@ -15,7 +15,7 @@
 //! [`WriteTransfer`] and [`ReadTransfer`] are one way to do it; the primitives
 //! they are built from are public, so a handler can be written instead. A
 //! transaction is a sequence of phases, and the step a handler takes depends on
-//! which one it is in — unlike a USART, where every step is the same.
+//! which one it is in.
 //!
 //! Writing: [`write_start`](I2c::write_start), then on
 //! [`sbsend`](I2c::sbsend) [`write_addr`](I2c::write_addr), then on
@@ -61,9 +61,6 @@ const RISE_TIME_FAST_NS: u32 = 300;
 const RISE_TIME_FAST_PLUS_NS: u32 = 120;
 
 /// A peripheral that [`I2c`] can drive.
-///
-/// I2C0 and I2C1 share one register block layout, so the driver is written once
-/// over [`Deref`]; the supertraits are what the constructor needs.
 pub trait Instance: Deref<Target = pac::i2c0::RegisterBlock> + Enable + Reset {}
 
 impl Instance for pac::I2c0 {}
@@ -91,8 +88,7 @@ macro_rules! i2c_pins {
 // They are therefore listed in the gated blocks, not here.
 //
 // The `pads_ge_*` gates say the package bonds the pin at all, and match the ones in
-// `gpio::Parts` — an entry for an unbonded pad would advertise in the docs a pin
-// nobody can obtain.
+// `gpio::Parts`.
 i2c_pins!(
     pac::I2c0:
         SDA: ['A' 10 : 4, #[cfg(pads_ge_24)] 'B' 7 : 1, #[cfg(pads_ge_48)] 'B' 9 : 1, 'F' 0 : 1]
@@ -208,8 +204,6 @@ fn write_fast_ckcfg<I2C: Instance>(i2c: &I2C, pclk1: u32, frequency: Hertz, duty
 }
 
 /// Ratio of the low to the high half of an SCL period (`DTCY`).
-///
-/// Only the fast modes can shape it, so it is a field of their variants alone.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[allow(missing_docs)]
@@ -268,8 +262,7 @@ impl I2cMode {
 
 /// An error the peripheral flagged in `STAT0` (manual Table 17-3).
 ///
-/// Its own type rather than [`ErrorKind`], which has no variant for a PEC
-/// mismatch or an SMBus alert; [`kind`] gives the portable classification.
+/// [`kind`] gives the portable classification.
 ///
 /// [`kind`]: embedded_hal::i2c::Error::kind
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -331,8 +324,7 @@ pub enum Event {
 
 /// A configured I²C master, owning the peripheral and its two pins.
 ///
-/// Both lines are open-drain and pulled up externally. There is no chip select:
-/// the target is named by the first byte of every transaction.
+/// Both lines are open-drain and need a pull-up.
 pub struct I2c<I2CX, SDA, SCL> {
     i2c: I2CX,
     sda_pin: SDA,
@@ -347,9 +339,8 @@ where
 {
     /// Enables the peripheral's clock, resets it and applies `mode`.
     ///
-    /// The pins must already be open-drain in this I²C's alternate function; the
-    /// bounds reject anything else at compile time. [`release`](Self::release)
-    /// hands them back. `I2CCLK` comes from `pclk1` in the frozen clocks.
+    /// The pins must already be open-drain in this I²C's alternate function;
+    /// [`release`](Self::release) hands them back.
     ///
     /// # Panics
     ///
@@ -617,13 +608,6 @@ where
     /// Reads `bytes.len()` bytes from the device at `address`, framed by START
     /// and STOP.
     ///
-    /// A read ends by withholding the acknowledge of the last byte, and `ACKEN`
-    /// governs the byte already on the wire — one ahead of the one being read.
-    /// Hence separate sequences for one and two bytes; longer reads leave a byte
-    /// unread so the peripheral stretches SCL while `ACKEN` is cleared (the
-    /// manual's "Solution B" — "Solution A" has to react within the last byte's
-    /// transfer, which an interrupt can break).
-    ///
     /// An empty `bytes` is a no-op: a zero-byte transfer has no acknowledge to
     /// end on.
     ///
@@ -740,9 +724,8 @@ where
     ///
     /// This is how a register-addressed device is read: the write phase moves its
     /// pointer, the read phase takes what the pointer names. A
-    /// [`write`](Self::write) then a [`read`](Self::read) is a different
-    /// operation — the STOP between them lets another master move the pointer,
-    /// and the wrong register reads back as valid data.
+    /// [`write`](Self::write) then a [`read`](Self::read) puts a STOP in between,
+    /// which some devices treat as the end of the register access.
     ///
     /// An empty `read` degenerates to [`write`](Self::write), an empty `write`
     /// to [`read`](Self::read).
@@ -823,8 +806,7 @@ where
     /// is free, then raises START and returns.
     ///
     /// Arms the interrupts itself and keeps re-arming them as the phases change,
-    /// so `listen` beforehand is neither needed nor respected. A handler written
-    /// by hand out of the primitives arms its own instead.
+    /// so `listen` beforehand is neither needed nor respected.
     ///
     /// # Panics
     ///
@@ -852,8 +834,7 @@ where
     /// Blocks only until the bus is free, then raises START and returns.
     ///
     /// Arms the interrupts itself and keeps re-arming them as the phases change,
-    /// so `listen` beforehand is neither needed nor respected. A handler written
-    /// by hand out of the primitives arms its own instead.
+    /// so `listen` beforehand is neither needed nor respected.
     ///
     /// # Panics
     ///
@@ -981,8 +962,6 @@ where
     }
     /// Gives back the peripheral, the buffer and the outcome.
     ///
-    /// The outcome rides alongside instead of wrapping the pair: a failed
-    /// transfer still has to hand the peripheral back, or it is lost for good.
     /// `None` means the transfer was taken apart while still running, in which
     /// case the bus is released with a STOP first.
     pub fn release(
@@ -1164,8 +1143,6 @@ where
     }
     /// Gives back the peripheral, the buffer and the outcome.
     ///
-    /// The outcome rides alongside instead of wrapping the pair: a failed
-    /// transfer still has to hand the peripheral back, or it is lost for good.
     /// `None` means the transfer was taken apart while still running, in which
     /// case the bus is released with a STOP first.
     pub fn release(

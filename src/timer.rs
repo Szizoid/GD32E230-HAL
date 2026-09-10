@@ -90,9 +90,8 @@ fn wait_update<TIMERX: Instance>(timer: &mut TIMERX) {
 
 /// A timer event that can raise an interrupt.
 ///
-/// Belongs to the counter itself, so every role that owns one takes it —
-/// [`CountDownTimer`], [`Pwm`] and [`Capture`] alike. Channel events are not
-/// here: a channel has exactly one, and it says so without an argument.
+/// Taken by [`CountDownTimer`], [`Pwm`] and [`Capture`] alike. Channel events
+/// are not here: a channel's `listen` takes no argument.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Event {
@@ -127,9 +126,6 @@ fn clear_pending<TIMERX: Instance>(timer: &mut TIMERX, event: Event) {
 }
 
 /// A timer peripheral, tying it to the bus that clocks it.
-///
-/// Which APB a timer sits on is fixed in silicon, so the frequency for the
-/// period arithmetic comes from the type rather than from an argument.
 pub trait Instance: Enable + Reset {
     /// The `CK_TIMERx` branch feeding this timer, taken from a frozen tree.
     fn clk(clocks: &Clocks) -> Hertz;
@@ -259,9 +255,7 @@ timer_instance! {
 
 /// A stopped timer, holding the peripheral and the frequency feeding it.
 ///
-/// Clocked and reset on construction, but the counter is not running: the
-/// methods that wait on the count live on the running type, so waiting on a
-/// timer that was never started cannot be expressed.
+/// Clocked and reset on construction, but the counter is not running.
 pub struct Timer<TIMERX> {
     timer: TIMERX,
     clk: Hertz,
@@ -334,8 +328,8 @@ impl<TIMERX: Instance> Timer<TIMERX> {
     /// Sets the counter free running and hands out the input capture role.
     ///
     /// Only the prescaler is a choice: it trades resolution against the longest
-    /// interval that still fits between two rollovers. Capture reads the counter
-    /// as a clock rather than a period, so the reload is pinned to the maximum.
+    /// interval that still fits between two rollovers. The reload is pinned to
+    /// the maximum.
     pub fn into_capture(mut self, psc: u16) -> Capture<TIMERX> {
         start_counter(&mut self.timer, psc, u16::MAX);
         Capture {
@@ -388,12 +382,8 @@ impl<TIMERX: Instance> CountDownTimer<TIMERX> {
         ticks_to_interval(self.cnt(), self.psc(), self.clk)
     }
 
-    /// Lets `event` raise an interrupt.
-    ///
-    /// Half of what an interrupt takes: the request now reaches the NVIC, which
-    /// still has the line masked. Unmasking it — `NVIC::unmask` on the
-    /// peripheral's [`Interrupt`](crate::pac::Interrupt) — is the caller's, this
-    /// crate does not touch core registers.
+    /// Lets `event` raise an interrupt. Unmasking the line in the NVIC is the
+    /// caller's.
     pub fn listen(&mut self, event: Event) {
         set_listening(&mut self.timer, event, true);
     }
@@ -478,8 +468,8 @@ impl<TIMERX: Instance> Delay<TIMERX> {
 
     /// Returns the peripheral.
     ///
-    /// The clock is left enabled and no reset is performed — a later `new()`
-    /// does both anyway.
+    /// The clock is left enabled and no reset is performed — a later
+    /// [`constrain`](TimerExt::constrain) does both anyway.
     pub fn release(self) -> TIMERX {
         self.timer
     }
@@ -617,8 +607,7 @@ impl<TIMERX: Instance> Capture<TIMERX> {
     ///
     /// Which channel it is follows from the pin, as in [`Pwm::channel`]. The
     /// channel comes out configured but not enabled, latches nothing until it is,
-    /// and holds the pin for as long as it lives. The edge is taken here so a
-    /// channel is never half configured;
+    /// and holds the pin for as long as it lives. The edge is set here;
     /// [`select_edge`](CaptureChannel::select_edge) changes it later.
     pub fn channel<PIN, const C: u8>(
         &mut self,
@@ -698,7 +687,7 @@ impl<TIMERX: Instance> DelayNs for Delay<TIMERX> {
     }
 }
 
-/// Entry point on the raw peripheral, mirroring `GpioExt` and `DmaExt`.
+/// Entry point on the raw peripheral.
 pub trait TimerExt: Sized {
     /// Clocks the peripheral, resets it, and records the clock feeding it.
     ///
@@ -720,10 +709,9 @@ impl<TIMERX: Instance> TimerExt for TIMERX {
 
 /// The switch turning channel `C` on, whichever direction it points.
 ///
-/// `CHxEN` serves both roles — releases the output on a compare channel, arms
-/// the latch on a capture one — so it sits above them. Implemented only for
-/// timer/channel pairs that exist, so a channel the hardware lacks cannot be
-/// named: `TIMER13` has channel 0 alone, `TIMER5` none at all.
+/// `CHxEN` releases the output on a compare channel and arms the latch on a
+/// capture one. Implemented for the timer/channel pairs that exist: `TIMER13`
+/// has channel 0 alone, `TIMER5` none at all.
 pub trait ChannelEnable<const C: u8>: Instance {
     /// Enables or disables the channel, leaving its setup in place.
     fn set_chxen(&mut self, on: bool);
@@ -780,9 +768,6 @@ channel_enable! {
 }
 
 /// Register operations on compare channel `C` of a timer.
-///
-/// Channel registers differ from one channel to the next, which is why the
-/// number lives in the type rather than in an argument.
 pub trait PwmOps<const C: u8>: ChannelEnable<C> {
     /// Configures the channel as a PWM output and readies it for a duty value.
     ///
@@ -914,10 +899,9 @@ channel_pins! {
 /// Channels of one timer share the period (`PSC`/`CAR` belong to their common
 /// counter); duty is the channel's own.
 ///
-/// Each channel carries its own handle to the peripheral, which is what lets four
-/// of them exist while the timer is a single value. Duties reach separate
-/// registers, but all the enables live in one: enabling a channel while another
-/// is enabled elsewhere — from an interrupt, say — can lose one of the writes.
+/// Duties reach separate registers, but all the enables live in one: enabling a
+/// channel while another is enabled elsewhere — from an interrupt, say — can
+/// lose one of the writes.
 pub struct PwmChannel<TIMERX, PIN, const C: u8> {
     timer: TIMERX,
     pin: PIN,
@@ -953,8 +937,7 @@ impl<TIMERX: PwmOps<C>, PIN: ChannelPin<TIMERX, C>, const C: u8> PwmChannel<TIME
     /// Lets the compare match raise an interrupt.
     ///
     /// Fires at the point in the period where the output flips, not at the
-    /// rollover — that one is [`CountDownTimer::listen`]. Takes no event: a
-    /// channel has exactly one, and which it means is already in the type.
+    /// rollover — that one is [`CountDownTimer::listen`].
     ///
     /// The whole timer shares one NVIC line, so a handler serving several
     /// channels tells them apart by [`is_listening`](Self::is_listening) and
@@ -995,9 +978,6 @@ impl<TIMERX: PwmOps<C>, PIN: ChannelPin<TIMERX, C>, const C: u8> PwmChannel<TIME
 }
 
 /// What can go wrong while reading a capture.
-///
-/// Its own type rather than a bare `Option`: a missing capture and a lost one are
-/// different answers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[non_exhaustive]
@@ -1014,10 +994,9 @@ pub enum Error {
 /// Channels of one timer share the time base (`PSC` belongs to their common
 /// counter); the edge and the latched value are the channel's own.
 ///
-/// Each channel carries its own handle to the peripheral, which is what lets four
-/// of them exist while the timer is a single value. Latching reaches separate
-/// registers, but all the enables live in one: enabling a channel while another
-/// is enabled elsewhere — from an interrupt, say — can lose one of the writes.
+/// Latching reaches separate registers, but all the enables live in one:
+/// enabling a channel while another is enabled elsewhere — from an interrupt,
+/// say — can lose one of the writes.
 pub struct CaptureChannel<TIMERX, PIN, const C: u8> {
     timer: TIMERX,
     pin: PIN,
@@ -1048,8 +1027,7 @@ impl<TIMERX: CaptureOps<C>, PIN: ChannelPin<TIMERX, C>, const C: u8>
     ///
     /// Turns waiting for an edge from a busy loop into a wake-up, and shrinks
     /// the window in which the next edge could overwrite an unread timestamp —
-    /// see [`Error::Overcapture`]. Takes no event: a channel has exactly one,
-    /// and which it means is already in the type.
+    /// see [`Error::Overcapture`].
     ///
     /// No separate clear: [`read`](Self::read) takes the flag down, being the
     /// same call a handler makes to collect the timestamp. The whole timer
@@ -1155,7 +1133,6 @@ impl<TIMERX: PwmOps<C>, PIN: ChannelPin<TIMERX, C>, const C: u8> SetDutyCycle
 
 /// Which edge on the pin makes a channel take its snapshot.
 ///
-/// A runtime value rather than a typestate: no method signature depends on it.
 /// Capturing on both edges is not offered — that encoding is reserved on every
 /// timer of this part.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1167,9 +1144,6 @@ pub enum Edge {
 }
 
 /// The input capture half of one channel, numbered by `C` like [`PwmOps`].
-///
-/// Mirrors the output side, with the register differences between timers and
-/// channels kept inside the implementations.
 pub trait CaptureOps<const C: u8>: ChannelEnable<C> {
     /// Points the channel at its pin and readies it to latch the counter.
     ///
